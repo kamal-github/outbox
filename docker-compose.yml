@@ -1,0 +1,36 @@
+version: '3'
+networks:
+  outbox-nw:
+    driver: bridge
+
+services:
+  worker:
+    build: .
+    container_name: outbox
+    depends_on:
+      - postgres
+      - rabbit
+    env_file:
+      - .env
+    networks:
+      - outbox-nw
+  postgres:
+    image: postgres:13.2-alpine
+    container_name: postgres
+    ports:
+      - 5432:5432
+    networks:
+      - outbox-nw
+    environment:
+      - POSTGRES_PASSWORD=password
+      - POSTGRES_USER=postgres
+      - POSTGRES_DB=test-outbox
+  rabbit:
+    image: 'rabbitmq:3.8.9-management-alpine'
+    container_name: rabbit
+    networks:
+      - outbox-nw
+    hostname: rabbit
+    ports:
+      - '5672:5672'
+      - '15672:15672'
