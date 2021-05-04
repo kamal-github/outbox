@@ -11,10 +11,10 @@ import (
 )
 
 type OutboxRow struct {
-	OutboxID int           `db:"id"`
-	Metadata Metadata      `db:"metadata"`
-	Payload  []byte        `db:"payload"`
-	Status   sql.NullInt64 `db:"status"`
+	OutboxID int
+	Metadata Metadata
+	Payload  []byte
+	Status   sql.NullInt64
 }
 
 type Metadata struct {

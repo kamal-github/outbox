@@ -3,7 +3,6 @@ package test
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"testing"
 	"time"
@@ -405,16 +404,7 @@ func populateOutboxTable(t *testing.T, db *sql.DB, rows []event.OutboxRow) {
 	defer preparedStmt.Close()
 
 	for _, row := range rows {
-		metadata, err := json.Marshal(row.Metadata)
-		if err != nil {
-			t.Fatal(err)
-		}
-		payload, err := json.Marshal(row.Payload)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		_, err = preparedStmt.Exec(metadata, payload)
+		_, err = preparedStmt.Exec(&row.Metadata, &row.Payload)
 		if err != nil {
 			t.Fatal(err)
 		}
