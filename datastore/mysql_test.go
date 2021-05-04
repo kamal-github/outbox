@@ -300,6 +300,7 @@ func TestMySQL_Sweep(t *testing.T) {
 				table:  tt.fields.table,
 				logger: tt.fields.logger,
 			}
+
 			if err := p.Sweep(tt.args.ctx, tt.args.relayedIDs, tt.args.failedIDs); (err != nil) != tt.wantErr {
 				t.Errorf("Sweep() error = %v, wantErr %v", err, tt.wantErr)
 			}

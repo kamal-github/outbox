@@ -31,10 +31,6 @@ func NewMySQL(db *sql.DB, table string, logger *zap.Logger) (MineSweeper, error)
 	}, nil
 }
 
-func (p MySQL) Close() error {
-	return p.db.Close()
-}
-
 func (p MySQL) Mine(ctx context.Context) ([]event.OutboxRow, error) {
 	q := fmt.Sprintf(
 		"select id, metadata, payload from %s where status IS NULL", p.table,
@@ -83,18 +79,8 @@ func (p MySQL) Sweep(ctx context.Context, relayedIDs []int, failedIDs []int) err
 	return nil
 }
 
-func buildPlaceholders(n int) string {
-	return "?" + strings.Repeat(",?", n-1)
-}
-
-func mapIntSliceInterfaceSlice(integers []int) []interface{} {
-	var iFaces []interface{}
-
-	for _, integer := range integers {
-		iFaces = append(iFaces, integer)
-	}
-
-	return iFaces
+func (p MySQL) Close() error {
+	return p.db.Close()
 }
 
 func (p MySQL) onSuccess(ctx context.Context, ids []int) error {
@@ -134,7 +120,10 @@ func (p MySQL) onFailure(ctx context.Context, ids []int) error {
 		buildPlaceholders(len(ids)),
 	)
 
-	res, err := p.db.ExecContext(ctx, q, Failed, mapIntSliceInterfaceSlice(ids))
+	args := make([]interface{}, 0)
+	args = append(args, Failed)
+	args = append(args, mapIntSliceInterfaceSlice(ids)...)
+	res, err := p.db.ExecContext(ctx, q, args...)
 	if err != nil {
 		return fmt.Errorf("%s: error while setting failed status: %w", errPrefix, err)
 	}
@@ -145,4 +134,18 @@ func (p MySQL) onFailure(ctx context.Context, ids []int) error {
 	p.logger.Info("outbox rows marked as failed", zap.Ints("outboxIDs", ids))
 
 	return nil
+}
+
+func buildPlaceholders(n int) string {
+	return "?" + strings.Repeat(",?", n-1)
+}
+
+func mapIntSliceInterfaceSlice(integers []int) []interface{} {
+	var iFaces []interface{}
+
+	for _, integer := range integers {
+		iFaces = append(iFaces, integer)
+	}
+
+	return iFaces
 }
