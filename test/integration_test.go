@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"os"
 	"testing"
 	"time"
 
@@ -323,17 +324,19 @@ type SQSQueueParam struct {
 func setupSQS(t *testing.T) *sqs.SQS {
 	t.Helper()
 
+	sqsHost := os.Getenv("SQS_HOST")
+
 	// Create the SQS queue
 	sess := session.Must(session.NewSessionWithOptions(session.Options{
 		SharedConfigState: session.SharedConfigDisable,
 		Config: aws.Config{
 			Credentials: credentials.NewStaticCredentials("test", "test", ""),
-			Endpoint:    aws.String("http://localhost:4566"),
+			Endpoint:    aws.String(sqsHost),
 			Region:      aws.String("eu-central-1"),
 		},
 	}))
 
-	return sqs.New(sess, aws.NewConfig().WithEndpoint("http://localhost:4566").WithRegion("eu-central-1"))
+	return sqs.New(sess, aws.NewConfig().WithEndpoint(sqsHost).WithRegion("eu-central-1"))
 }
 
 func unique() int {
@@ -360,7 +363,8 @@ func createSQSQueue(t *testing.T, sqsService *sqs.SQS) (*sqs.CreateQueueOutput, 
 
 func setupPostgres(t *testing.T) (*sql.DB, func()) {
 	// Create the outbox table
-	db, err := sql.Open("postgres", "postgres://postgres:password@localhost:5432/test-outbox?sslmode=disable")
+
+	db, err := sql.Open("postgres", os.Getenv("DB_URL"))
 	if err != nil {
 		t.Fatal(err)
 	}

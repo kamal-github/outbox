@@ -6,21 +6,21 @@ networks:
 services:
   mysql:
     image: mysql:8.0.24
-    container_name: mysql
+    container_name: ob-mysql
     restart: always
     command: --default-authentication-plugin=mysql_native_password
     ports:
-      - 3306:3306
+      - 33060:3306
     networks:
       - outbox-nw
     environment:
       - MYSQL_ROOT_PASSWORD=password
   postgres:
     image: postgres:13.2-alpine
-    container_name: postgres
+    container_name: ob-postgres
     restart: always
     ports:
-      - 5432:5432
+      - 54320:5432
     networks:
       - outbox-nw
     environment:
@@ -29,20 +29,20 @@ services:
       - POSTGRES_DB=test-outbox
   rabbit:
     image: 'rabbitmq:3.8.9-management-alpine'
-    container_name: rabbit
+    container_name: ob-rabbit
     networks:
       - outbox-nw
     hostname: rabbit
     ports:
-      - '5672:5672'
+      - '56720:5672'
       - '15672:15672'
   sqs:
     image: 'localstack/localstack'
-    container_name: sqs
+    container_name: ob-sqs
     networks:
       - outbox-nw
     ports:
-    - '4566:4566'
+    - '45660:4566'
     - '4571:4571'
     environment:
       - SERVICES=sqs
