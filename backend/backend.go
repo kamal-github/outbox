@@ -12,7 +12,12 @@ const (
 	SQS      = "sqs"
 )
 
+type (
+	SuccessIDs []int
+	FailedIDs  []int
+)
+
 type Dispatcher interface {
-	Dispatch(ctx context.Context, rows []event.OutboxRow) ([]int, []int, error)
+	Dispatch(ctx context.Context, rows []event.OutboxRow) (SuccessIDs, FailedIDs, error)
 	io.Closer
 }

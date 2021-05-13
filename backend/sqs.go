@@ -29,7 +29,7 @@ func NewSimpleQueueService(sqsConn *sqs.SQS, logger *zap.Logger) (Dispatcher, er
 	}, nil
 }
 
-func (s *SimpleQueueService) Dispatch(ctx context.Context, rows []event.OutboxRow) ([]int, []int, error) {
+func (s *SimpleQueueService) Dispatch(ctx context.Context, rows []event.OutboxRow) (SuccessIDs, FailedIDs, error) {
 	successIDs := make([]int, 0)
 	failedIDs := make([]int, 0)
 
@@ -61,5 +61,5 @@ func (s *SimpleQueueService) Dispatch(ctx context.Context, rows []event.OutboxRo
 func (s *SimpleQueueService) Close() error {
 	// Not implemented yet. No documentation found for
 	// closing AWS session.
-	return nil
+	return errors.New("no method on SQS connection")
 }
