@@ -2,7 +2,6 @@ package backend
 
 import (
 	"context"
-	"time"
 
 	"github.com/kamal-github/outbox/event"
 	"github.com/streadway/amqp"
@@ -23,14 +22,13 @@ func (r *RabbitMQ) Dispatch(ctx context.Context, rows []event.OutboxRow) (Succes
 
 	for _, row := range rows {
 		cfg := row.Metadata.RabbitCfg
-		amqpPub := amqpPublishing(cfg.Publishing, row)
 
 		if err := r.ch.Publish(
 			cfg.Exchange,
 			cfg.RoutingKey,
 			cfg.Mandatory,
 			cfg.Immediate,
-			amqpPub,
+			cfg.Publishing,
 		); err != nil {
 			failedIDs = append(failedIDs, row.OutboxID)
 			continue
@@ -59,30 +57,4 @@ func NewRabbitMQ(c *amqp.Connection, l *zap.Logger) (Dispatcher, error) {
 	}
 
 	return r, nil
-}
-
-func amqpPublishing(pub event.Publishing, row event.OutboxRow) amqp.Publishing {
-	ts := time.Time{}
-	if pub.Timestamp != nil {
-		ts = *pub.Timestamp
-	}
-
-	amqpPub := amqp.Publishing{
-		Headers:         pub.Headers,
-		ContentType:     pub.ContentType,
-		ContentEncoding: pub.ContentEncoding,
-		DeliveryMode:    pub.DeliveryMode,
-		Priority:        pub.Priority,
-		CorrelationId:   pub.CorrelationId,
-		ReplyTo:         pub.ReplyTo,
-		Expiration:      pub.Expiration,
-		MessageId:       pub.MessageId,
-		Timestamp:       ts,
-		Type:            pub.Type,
-		UserId:          pub.UserId,
-		AppId:           pub.AppId,
-		Body:            row.Payload,
-	}
-
-	return amqpPub
 }

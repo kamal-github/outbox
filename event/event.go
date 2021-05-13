@@ -5,7 +5,8 @@ import (
 	"database/sql/driver"
 	"encoding/json"
 	"errors"
-	"time"
+
+	"github.com/streadway/amqp"
 
 	"github.com/aws/aws-sdk-go/service/sqs"
 )
@@ -36,27 +37,11 @@ func (m *Metadata) Value() (driver.Value, error) {
 }
 
 type RabbitCfg struct {
-	Exchange   string     `json:"exchange"`
-	RoutingKey string     `json:"routingKey"`
-	Mandatory  bool       `json:"mandatory"`
-	Immediate  bool       `json:"immediate"`
-	Publishing Publishing `json:"publishing"`
-}
-
-type Publishing struct {
-	Headers         map[string]interface{} `json:"headers"`
-	ContentType     string                 `json:"contentType"`     // MIME content type
-	ContentEncoding string                 `json:"contentEncoding"` // MIME content encoding
-	DeliveryMode    uint8                  `json:"deliveryMode"`    // Transient (0 or 1) or Persistent (2)
-	Priority        uint8                  `json:"priority"`        // 0 to 9
-	CorrelationId   string                 `json:"correlationId"`   // correlation identifier
-	ReplyTo         string                 `json:"replyTo"`         // address to to reply to (ex: RPC)
-	Expiration      string                 `json:"expiration"`      // message expiration spec
-	MessageId       string                 `json:"messageId"`       // message identifier
-	Timestamp       *time.Time             `json:"timestamp"`       // message timestamp
-	Type            string                 `json:"type"`            // message type name
-	UserId          string                 `json:"userId"`          // creating user id - ex: "guest"
-	AppId           string                 `json:"appId"`           // creating application id
+	Exchange   string          `json:"exchange"`
+	RoutingKey string          `json:"routingKey"`
+	Mandatory  bool            `json:"mandatory"`
+	Immediate  bool            `json:"immediate"`
+	Publishing amqp.Publishing `json:"publishing"`
 }
 
 type SQSCfg struct {
