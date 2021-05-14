@@ -18,9 +18,10 @@ type Worker struct {
 }
 
 func (w Worker) Start(ctx context.Context, done chan<- struct{}) {
-	ticker := time.Tick(w.MineInterval)
+	ticker := time.NewTicker(w.MineInterval)
+	defer ticker.Stop()
 
-	for range ticker {
+	for range ticker.C {
 		select {
 		case <-ctx.Done():
 			done <- struct{}{}

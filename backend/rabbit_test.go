@@ -12,12 +12,7 @@ import (
 )
 
 func TestRabbitMQ_Dispatch(t *testing.T) {
-	conn, err := amqp.Dial(os.Getenv("RABBIT_URL"))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	r, err := NewRabbitMQ(conn, zap.NewNop())
+	r, err := NewRabbitMQ(os.Getenv("RABBIT_URL"), zap.NewNop())
 	if err != nil {
 		t.Fatal(err)
 	}
