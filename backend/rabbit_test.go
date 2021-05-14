@@ -6,21 +6,22 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/angora-go/angora"
+
 	"github.com/kamal-github/outbox/event"
-	"github.com/streadway/amqp"
 	"go.uber.org/zap"
 )
 
 func TestRabbitMQ_Dispatch(t *testing.T) {
-	r, err := NewRabbitMQ(os.Getenv("RABBIT_URL"), zap.NewNop())
+	r, err := NewRabbitMQ(os.Getenv("RABBIT_URL"), nil, zap.NewNop())
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	type fields struct {
-		conn   *amqp.Connection
-		ch     *amqp.Channel
-		logger *zap.Logger
+		conn    *angora.Connection
+		logger  *zap.Logger
+		sweeper Sweeper
 	}
 	type args struct {
 		ctx  context.Context
