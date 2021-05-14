@@ -3,7 +3,6 @@ package backend
 import (
 	"context"
 	"os"
-	"reflect"
 	"testing"
 
 	"github.com/angora-go/angora"
@@ -30,8 +29,7 @@ func TestRabbitMQ_Dispatch(t *testing.T) {
 	tests := []struct {
 		name    string
 		args    args
-		want    SuccessIDs
-		want1   FailedIDs
+		fields  fields
 		wantErr bool
 	}{
 		{
@@ -40,20 +38,19 @@ func TestRabbitMQ_Dispatch(t *testing.T) {
 				ctx:  context.TODO(),
 				rows: []event.OutboxRow{},
 			},
+			fields: fields{
+				conn:    nil,
+				logger:  zap.NewNop(),
+				sweeper: nil,
+			},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			sIDs, fIDs, err := r.Dispatch(tt.args.ctx, tt.args.rows)
+			err := r.Dispatch(tt.args.ctx, tt.args.rows)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("Dispatch() error = %v, wantErr %v", err, tt.wantErr)
 				return
-			}
-			if !reflect.DeepEqual(sIDs, tt.want) {
-				t.Errorf("Dispatch() got = %v, want %v", sIDs, tt.want)
-			}
-			if !reflect.DeepEqual(fIDs, tt.want1) {
-				t.Errorf("Dispatch() got1 = %v, want %v", fIDs, tt.want1)
 			}
 		})
 	}

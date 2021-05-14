@@ -12,10 +12,12 @@ import (
 
 type SimpleQueueService struct {
 	sqsConn *sqs.SQS
-	logger  *zap.Logger
+	sweeper Sweeper
+
+	logger *zap.Logger
 }
 
-func NewSimpleQueueService(sqsConn *sqs.SQS, logger *zap.Logger) (Dispatcher, error) {
+func NewSimpleQueueService(sqsConn *sqs.SQS, sw Sweeper, logger *zap.Logger) (*SimpleQueueService, error) {
 	if sqsConn == nil {
 		return nil, errors.New("SimpleQueueService: invalid SQS connection")
 	}
@@ -26,20 +28,19 @@ func NewSimpleQueueService(sqsConn *sqs.SQS, logger *zap.Logger) (Dispatcher, er
 	return &SimpleQueueService{
 		sqsConn: sqsConn,
 		logger:  logger,
+		sweeper: sw,
 	}, nil
 }
 
-func (s *SimpleQueueService) Dispatch(ctx context.Context, rows []event.OutboxRow) (SuccessIDs, FailedIDs, error) {
-	successIDs := make([]int, 0)
-	failedIDs := make([]int, 0)
+func (s *SimpleQueueService) Dispatch(ctx context.Context, rows []event.OutboxRow) (err error) {
+	var mi *sqs.SendMessageInput
 
-	var (
-		mi  *sqs.SendMessageInput
-		err error
-	)
+	dispatchedIDs := make(DispatchedIDs, 0)
+	failedIDs := make(FailedIDs, 0)
 
 	for _, row := range rows {
 		if row.Metadata.SQSCfg == nil {
+			s.logger.Error("invalid SQS config")
 			failedIDs = append(failedIDs, row.OutboxID)
 			continue
 		}
@@ -51,11 +52,15 @@ func (s *SimpleQueueService) Dispatch(ctx context.Context, rows []event.OutboxRo
 			continue
 		}
 
-		successIDs = append(successIDs, row.OutboxID)
+		dispatchedIDs = append(dispatchedIDs, row.OutboxID)
 	}
 
-	s.logger.Debug("Messages relayed", zap.Ints("successIDs", successIDs), zap.Ints("failedIDs", failedIDs))
-	return successIDs, failedIDs, nil
+	if err = s.sweeper.Sweep(ctx, dispatchedIDs, failedIDs); err != nil {
+		return
+	}
+
+	s.logger.Debug("Messages relayed", zap.Ints("dispatchedIDs", dispatchedIDs), zap.Ints("failedIDs", failedIDs))
+	return
 }
 
 func (s *SimpleQueueService) Close() error {

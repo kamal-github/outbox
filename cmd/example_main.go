@@ -24,17 +24,6 @@ func main() {
 		panic(err)
 	}
 
-	// Setup AWS session and SQS connection
-	awsSession := session.Must(session.NewSession())
-	sqsConn := sqs.New(awsSession)
-
-	// Setup SQS as backend
-	dispatcher, err := backend.NewSimpleQueueService(sqsConn, logger)
-	if err != nil {
-		panic(err)
-	}
-	defer dispatcher.Close()
-
 	// Connect to Postgres
 	dsName := "postgres://postgres:password@localhost:5432/test-outbox?sslmode=disable"
 	dbConn, err := connectToSQLDB("postgres", dsName)
@@ -48,6 +37,17 @@ func main() {
 		panic(err)
 	}
 	defer mineSweeper.Close()
+
+	// Setup AWS session and SQS connection
+	awsSession := session.Must(session.NewSession())
+	sqsConn := sqs.New(awsSession)
+
+	// Setup SQS as backend
+	dispatcher, err := backend.NewSimpleQueueService(sqsConn, mineSweeper, logger)
+	if err != nil {
+		panic(err)
+	}
+	defer dispatcher.Close()
 
 	// Graceful shutdown
 	sig := make(chan os.Signal, 1)

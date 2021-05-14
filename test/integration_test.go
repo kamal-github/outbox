@@ -59,7 +59,7 @@ func TestOutboxSQSWithPostgres_success(t *testing.T) {
 	}
 
 	// Dispatch
-	simpleQueueService, err := backend.NewSimpleQueueService(sqsConn, logger)
+	simpleQueueService, err := backend.NewSimpleQueueService(sqsConn, pg, logger)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,7 +174,7 @@ func TestOutboxSQSWithPostgres_withBadData(t *testing.T) {
 	}
 
 	// Dispatch
-	simpleQueueService, err := backend.NewSimpleQueueService(sqsConn, logger)
+	simpleQueueService, err := backend.NewSimpleQueueService(sqsConn, pg, logger)
 	if err != nil {
 		t.Fatal(err)
 	}

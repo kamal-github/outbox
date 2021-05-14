@@ -20,13 +20,14 @@ type RabbitMQ struct {
 }
 
 // Dispatch relays the message to RabbitMQ exchange.
-func (r *RabbitMQ) Dispatch(ctx context.Context, rows []event.OutboxRow) (SuccessIDs, FailedIDs, error) {
-	successIDs := make([]int, 0)
+// Successful publish is considered when publish confirm is received, and then sweeper sweeps the successful outbox rows.
+// Failed to publish are immediately marked as "Failed" by sweeper.
+func (r *RabbitMQ) Dispatch(ctx context.Context, rows []event.OutboxRow) (err error) {
 	failedIDs := make([]int, 0)
 
 	for _, row := range rows {
 		cfg := row.Metadata.RabbitCfg
-		if err := r.conn.Publish(
+		if err = r.conn.Publish(
 			ctx,
 			cfg.Exchange,
 			angora.ProducerConfig{
@@ -39,13 +40,12 @@ func (r *RabbitMQ) Dispatch(ctx context.Context, rows []event.OutboxRow) (Succes
 			failedIDs = append(failedIDs, row.OutboxID)
 			continue
 		}
-
-		//successIDs = append(successIDs, row.OutboxID)
 	}
 
-	return successIDs, failedIDs, nil
+	return r.sweeper.Sweep(ctx, nil, failedIDs)
 }
 
+// Close gracefully closes the underlying amqp.Connection through angora.
 func (r *RabbitMQ) Close() error {
 	return r.conn.Shutdown(context.Background())
 }
@@ -53,25 +53,25 @@ func (r *RabbitMQ) Close() error {
 type Option func(mq *RabbitMQ) error
 
 func WithTLS(t *tls.Config) Option {
-	return func(mq *RabbitMQ) error {
+	return func(r *RabbitMQ) error {
 		if t == nil {
 			return fmt.Errorf("invalid tls config, %v", t)
 		}
 
-		mq.tls = t
+		r.tls = t
 
 		return nil
 	}
 }
 
-// NewRabbitMQ creates a RabbitMQ dispatcher
-func NewRabbitMQ(backendURL string, s Sweeper, logger *zap.Logger, opts ...Option) (Dispatcher, error) {
+// NewRabbitMQ creates a RabbitMQ dispatcher.
+func NewRabbitMQ(amqpURL string, sw Sweeper, logger *zap.Logger, opts ...Option) (*RabbitMQ, error) {
 	var err error
 
 	r := &RabbitMQ{
-		backendURL: backendURL,
+		backendURL: amqpURL,
 		logger:     logger,
-		sweeper:    s,
+		sweeper:    sw,
 	}
 
 	for _, o := range opts {
@@ -93,10 +93,17 @@ func NewRabbitMQ(backendURL string, s Sweeper, logger *zap.Logger, opts ...Optio
 		}
 	}
 
-	r.conn, err = angora.NewConnection(
-		backendURL,
+	angOpts := []angora.Option{
 		angora.WithPublishConfirm(onPubConfirmAckFn),
-		angora.WithTLSConfig(r.tls),
+	}
+
+	if r.tls != nil {
+		angOpts = append(angOpts, angora.WithTLSConfig(r.tls))
+	}
+
+	r.conn, err = angora.NewConnection(
+		amqpURL,
+		angOpts...,
 	)
 	if err != nil {
 		return nil, err
