@@ -7,3 +7,6 @@ test-dep-down:
 test-cov: test-dep-up
 	go test -v -race -coverprofile outbox.out ./...
 	go tool cover -html=outbox.out
+
+test: test-dep-up
+	go test -v -race ./...
