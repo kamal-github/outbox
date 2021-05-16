@@ -5,6 +5,12 @@ import (
 	"os"
 	"testing"
 
+	"github.com/streadway/amqp"
+
+	"github.com/golang/mock/gomock"
+
+	sweepermock "github.com/kamal-github/outbox/backend/mocks"
+
 	"github.com/angora-go/angora"
 
 	"github.com/kamal-github/outbox/event"
@@ -12,7 +18,13 @@ import (
 )
 
 func TestRabbitMQ_Dispatch(t *testing.T) {
-	r, err := NewRabbitMQ(os.Getenv("RABBIT_URL"), nil, zap.NewNop())
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	m := sweepermock.NewMockSweeper(ctrl)
+	m.EXPECT().Sweep(context.TODO(), nil, nil).Return(nil).Times(1)
+
+	r, err := NewRabbitMQ(os.Getenv("BACKEND_URL"), m, zap.NewNop())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -29,19 +41,50 @@ func TestRabbitMQ_Dispatch(t *testing.T) {
 	tests := []struct {
 		name    string
 		args    args
-		fields  fields
 		wantErr bool
 	}{
 		{
 			name: "It dispatches the message to the exchange",
 			args: args{
-				ctx:  context.TODO(),
-				rows: []event.OutboxRow{},
-			},
-			fields: fields{
-				conn:    nil,
-				logger:  zap.NewNop(),
-				sweeper: nil,
+				ctx: context.TODO(),
+				rows: []event.OutboxRow{
+					{
+						OutboxID: 1,
+						Metadata: event.Metadata{
+							RabbitCfg: &event.RabbitCfg{
+								Exchange:   "test.exchange",
+								RoutingKey: "test.routingKey",
+								Publishing: amqp.Publishing{
+									Body: []byte("test payload"),
+								},
+							},
+						},
+					},
+					{
+						OutboxID: 2,
+						Metadata: event.Metadata{
+							RabbitCfg: &event.RabbitCfg{
+								Exchange:   "test.exchange",
+								RoutingKey: "test.routingKey",
+								Publishing: amqp.Publishing{
+									Body: []byte("test payload"),
+								},
+							},
+						},
+					},
+					{
+						OutboxID: 3,
+						Metadata: event.Metadata{
+							RabbitCfg: &event.RabbitCfg{
+								Exchange:   "test.exchange",
+								RoutingKey: "test.routingKey",
+								Publishing: amqp.Publishing{
+									Body: []byte("test payload"),
+								},
+							},
+						},
+					},
+				},
 			},
 		},
 	}

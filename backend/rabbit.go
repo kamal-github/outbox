@@ -7,6 +7,7 @@ import (
 
 	"github.com/angora-go/angora"
 	"github.com/kamal-github/outbox/event"
+	"github.com/streadway/amqp"
 	"go.uber.org/zap"
 )
 
@@ -19,14 +20,26 @@ type RabbitMQ struct {
 	logger *zap.Logger
 }
 
+const outboxID = "outboxID"
+
 // Dispatch relays the message to RabbitMQ exchange.
 // Successful publish is considered when publish confirm is received, and then sweeper sweeps the successful outbox rows.
 // Failed to publish are immediately marked as "Failed" by sweeper.
 func (r *RabbitMQ) Dispatch(ctx context.Context, rows []event.OutboxRow) (err error) {
-	failedIDs := make([]int, 0)
+	var failedIDs []int
 
 	for _, row := range rows {
 		cfg := row.Metadata.RabbitCfg
+		if cfg == nil {
+			failedIDs = append(failedIDs, row.OutboxID)
+			continue
+		}
+
+		// Adding outbox id to the header so as to identify which outbox row is
+		// publisher confirmation ACKed.
+		h := amqp.Table{outboxID: row.OutboxID}
+		cfg.Publishing.Headers = h
+
 		if err = r.conn.Publish(
 			ctx,
 			cfg.Exchange,
@@ -81,19 +94,35 @@ func NewRabbitMQ(amqpURL string, sw Sweeper, logger *zap.Logger, opts ...Option)
 	}
 
 	onPubConfirmAckFn := func(deliveryTaggedData interface{}, ack bool) {
-		var successID, failedID int
-		if ack {
-			successID = deliveryTaggedData.(int)
-		} else {
-			failedID = deliveryTaggedData.(int)
+		var (
+			data angora.UnconfirmedPub
+			ok   bool
+		)
+
+		if data, ok = deliveryTaggedData.(angora.UnconfirmedPub); !ok {
+			panic("wrong delivery")
 		}
 
-		if err := r.sweeper.Sweep(context.Background(), []int{successID}, []int{failedID}); err != nil {
-			logger.Error("failed to sweep", zap.Int("successID", successID), zap.Int("failedID", failedID), zap.Bool("Ack", ack))
+		var oid int
+		id := data.Publishing.Headers[outboxID]
+		if oid, ok = id.(int); !ok {
+			panic("invalid id type")
+		}
+
+		var successIDs, failedIDs []int
+		if ack {
+			successIDs = append(successIDs, oid)
+		} else {
+			failedIDs = append(failedIDs, oid)
+		}
+
+		if err := r.sweeper.Sweep(context.Background(), successIDs, failedIDs); err != nil {
+			logger.Error("failed to sweep", zap.Ints("successIDs", successIDs), zap.Ints("failedID", failedIDs), zap.Bool("Ack", ack))
 		}
 	}
 
 	angOpts := []angora.Option{
+		angora.WithChannelPool(),
 		angora.WithPublishConfirm(onPubConfirmAckFn),
 	}
 

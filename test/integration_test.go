@@ -8,8 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kamal-github/outbox/event"
-
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/session"
@@ -17,10 +15,14 @@ import (
 	outbox_worker "github.com/kamal-github/outbox"
 	"github.com/kamal-github/outbox/backend"
 	"github.com/kamal-github/outbox/datastore"
+	"github.com/kamal-github/outbox/event"
+	"github.com/streadway/amqp"
+	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
 )
 
-func TestOutboxSQSWithPostgres_success(t *testing.T) {
+func TestOutbox_SQSWithPostgres_success(t *testing.T) {
+	t.Parallel()
 	logger := zap.NewNop()
 
 	// SQS setup
@@ -30,15 +32,16 @@ func TestOutboxSQSWithPostgres_success(t *testing.T) {
 
 	expectedMessages := make([]string, 5)
 	for i := 0; i < 5; i++ {
-		expectedMessages[i] = fmt.Sprintf("HelloSQS-%d", unique())
+		expectedMessages[i] = uniqueString("HelloSQS")
 	}
 
 	// DB setup
-	db, dbCleaner := setupPostgres(t)
+	outboxTable := uniqueString("outbox")
+	db, dbCleaner := setupPostgres(t, outboxTable)
 	defer dbCleaner()
 
 	for _, m := range expectedMessages {
-		populateOutboxTable(t, db, []event.OutboxRow{
+		populateOutboxTable(t, db, outboxTable, []event.OutboxRow{
 			{
 				Metadata: event.Metadata{
 					SQSCfg: &event.SQSCfg{
@@ -53,7 +56,7 @@ func TestOutboxSQSWithPostgres_success(t *testing.T) {
 	}
 
 	// Minesweeper
-	pg, err := datastore.NewPostgres(db, "outbox", zap.NewNop())
+	pg, err := datastore.NewPostgres(db, outboxTable, zap.NewNop())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,7 +98,7 @@ func TestOutboxSQSWithPostgres_success(t *testing.T) {
 	}
 
 	// assert outbox table count to be zero.
-	rows, err := getRowsFromOutboxTable(db)
+	rows, err := getRowsFromOutboxTable(db, outboxTable)
 	if err != nil {
 		t.Errorf("getRowsFromOutboxTable error expected=%v, got=%v", nil, err)
 	}
@@ -108,7 +111,8 @@ func TestOutboxSQSWithPostgres_success(t *testing.T) {
 	<-done
 }
 
-func TestOutboxSQSWithPostgres_withBadData(t *testing.T) {
+func TestOutbox_SQSWithPostgres_withBadData(t *testing.T) {
+	t.Parallel()
 	logger := zap.NewNop()
 
 	// SQS setup
@@ -118,7 +122,7 @@ func TestOutboxSQSWithPostgres_withBadData(t *testing.T) {
 
 	expectedMessages := make([]string, 5)
 	for i := 0; i < 5; i++ {
-		expectedMessages[i] = fmt.Sprintf("HelloSQS-%d", unique())
+		expectedMessages[i] = uniqueString("HelloSQS")
 	}
 
 	params := make([]SQSQueueParam, len(expectedMessages))
@@ -130,11 +134,12 @@ func TestOutboxSQSWithPostgres_withBadData(t *testing.T) {
 	}
 
 	// DB setup
-	db, dbCleaner := setupPostgres(t)
+	outboxTable := uniqueString("outbox")
+	db, dbCleaner := setupPostgres(t, outboxTable)
 	defer dbCleaner()
 
 	for _, m := range expectedMessages {
-		populateOutboxTable(t, db, []event.OutboxRow{
+		populateOutboxTable(t, db, outboxTable, []event.OutboxRow{
 			{
 				Metadata: event.Metadata{
 					SQSCfg: &event.SQSCfg{
@@ -149,7 +154,7 @@ func TestOutboxSQSWithPostgres_withBadData(t *testing.T) {
 	}
 
 	// adding intentional bad messages
-	populateOutboxTable(t, db, []event.OutboxRow{
+	populateOutboxTable(t, db, outboxTable, []event.OutboxRow{
 		{
 			Metadata: event.Metadata{
 				SQSCfg: nil,
@@ -168,7 +173,7 @@ func TestOutboxSQSWithPostgres_withBadData(t *testing.T) {
 	})
 
 	// Minesweeper
-	pg, err := datastore.NewPostgres(db, "outbox", zap.NewNop())
+	pg, err := datastore.NewPostgres(db, outboxTable, zap.NewNop())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -210,7 +215,7 @@ func TestOutboxSQSWithPostgres_withBadData(t *testing.T) {
 	}
 
 	// assert outbox table count to be zero.
-	rows, err := getRowsFromOutboxTable(db)
+	rows, err := getRowsFromOutboxTable(db, outboxTable)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			t.Errorf("getRowsFromOutboxTable error expected=%v, got=%v", nil, err)
@@ -231,90 +236,267 @@ func TestOutboxSQSWithPostgres_withBadData(t *testing.T) {
 	<-done
 }
 
-//func TestOutboxRabbitMQWithPostgres(t *testing.T) {
-//	logger := zap.NewNop()
-//
-//	// Rabbit setup
-//	rabbitConn := setupRabbit(t)
-//	createQueueOutput, queueCleaner := createRabbitQueue(t, rabbitConn)
-//	defer queueCleaner()
-//
-//	expectedMessages := make([]string, 5)
-//	for i := 0; i < 5; i++ {
-//		expectedMessages[i] = fmt.Sprintf("HelloRabbitMQ-%d", unique())
-//	}
-//
-//	// DB setup
-//	db, dbCleaner := setupPostgres(t)
-//	defer dbCleaner()
-//
-//	for _, m := range expectedMessages {
-//		populateOutboxTable(t, db, []event.OutboxRow{
-//			{
-//				Metadata: event.Metadata{
-//					RabbitCfg: &event.RabbitCfg{
-//						Exchange:   "",
-//						RoutingKey: "",
-//						Mandatory:  false,
-//						Immediate:  false,
-//						Publishing: event.Publishing{},
-//					},
-//				},
-//				Payload: []byte(m),
-//			},
-//		})
-//	}
-//
-//	// Minesweeper
-//	pg, err := datastore.NewMineSweeper(db, "postgres", "outbox", zap.NewNop())
-//	if err != nil {
-//		t.Fatal(err)
-//	}
-//
-//	// Dispatch
-//	rabbitMQ, err := backend.Provider(
-//		config.ENV{
-//			Backend:    "rabbitmq",
-//			BackendURL: "rabbitmq://localhost:5672",
-//		},
-//		nil,
-//		logger,
-//	)
-//	if err != nil {
-//		t.Fatal(err)
-//	}
-//
-//	// Worker
-//	w := pkg.Worker{
-//		MineSweeper:    pg,
-//		Dispatcher: rabbitMQ,
-//		Logger:       logger,
-//		MineInterval: 1 * time.Millisecond,
-//	}
-//
-//	ctx, cancel := context.WithCancel(context.Background())
-//	done := make(chan struct{}, 1)
-//	defer cancel()
-//
-//	go w.Start(ctx, done)
-//
-//	// assert the consumption of messages for count and message body from RabbitMQ Queue.
-//	for i := 0; i < len(expectedMessages); i++ {
-//	}
-//
-//	// assert outbox table count to be zero.
-//	rows, err := getRowsFromOutboxTable(db)
-//	if err != nil {
-//		t.Errorf("getRowsFromOutboxTable error expected=%v, got=%v", nil, err)
-//	}
-//
-//	if len(rows) != 0 {
-//		t.Errorf("rows expected=%d, got=%d", 0, len(rows))
-//	}
-//
-//	cancel()
-//	<-done
-//}
+var (
+	jsonType = "application/json"
+	amqpURL  = os.Getenv("BACKEND_URL")
+)
+
+func TestOutbox_RabbitMQWithPostgres_withSuccess(t *testing.T) {
+	t.Parallel()
+
+	logger := zap.NewNop()
+
+	tests := []struct {
+		name              string
+		events            func() []event.OutboxRow
+		expectedRowsCount int
+	}{
+		{
+			name: "it successfully publishes and remove the rows from DB",
+			events: func() []event.OutboxRow {
+				qn, ex, rKey := uniqueString("test.outbox.queue"), uniqueString("test.outbox.exchange"), uniqueString("test.outbox.rKey")
+				_, closer := setup(t, qn, ex, rKey)
+				defer closer()
+
+				rows := make([]event.OutboxRow, 5)
+				for i := 0; i < 5; i++ {
+					rows[i] = event.OutboxRow{
+						Metadata: event.Metadata{
+							RabbitCfg: &event.RabbitCfg{
+								Exchange:   ex,
+								RoutingKey: rKey,
+								Mandatory:  false,
+								Immediate:  false,
+								Publishing: amqp.Publishing{
+									ContentType:  jsonType,
+									Timestamp:    time.Now().UTC(),
+									Body:         []byte(uniqueString("Hello from Outbox")),
+									DeliveryMode: amqp.Transient,
+								},
+							},
+						},
+					}
+				}
+				return rows
+			},
+			expectedRowsCount: 0,
+		},
+		{
+			name: "it keeps the rows in `InProcess` status for rows with invalid Metadata",
+			events: func() []event.OutboxRow {
+				rows := make([]event.OutboxRow, 3)
+				for i := 0; i < 3; i++ {
+					rows[i] = event.OutboxRow{
+						Metadata: event.Metadata{
+							RabbitCfg: nil,
+						},
+					}
+				}
+				return rows
+			},
+			expectedRowsCount: 3,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			// DB setup
+			outboxTable := uniqueString("outbox")
+			db, dbCleaner := setupPostgres(t, outboxTable)
+			defer dbCleaner()
+
+			// Minesweeper
+			pg, err := datastore.NewPostgres(db, outboxTable, zap.NewNop())
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			// Dispatcher
+			rabbitMQ, err := backend.NewRabbitMQ(
+				amqpURL,
+				pg,
+				logger,
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer rabbitMQ.Close()
+
+			populateOutboxTable(t, db, outboxTable, tt.events())
+
+			// Worker
+			w := outbox_worker.Worker{
+				MineSweeper:  pg,
+				Dispatcher:   rabbitMQ,
+				Logger:       logger,
+				MineInterval: 1 * time.Millisecond,
+			}
+
+			ctx, cancel := context.WithCancel(context.Background())
+			done := make(chan struct{}, 1)
+			defer cancel()
+
+			go w.Start(ctx, done)
+
+			time.Sleep(100 * time.Millisecond)
+
+			cancel()
+			<-done
+			// assert outbox table count to be zero.
+			rows, err := getRowsFromOutboxTable(db, outboxTable)
+			if err != nil {
+				t.Errorf("getRowsFromOutboxTable error expected=%v, got=%v", nil, err)
+			}
+
+			if len(rows) != tt.expectedRowsCount {
+				t.Errorf("rows expected=%d, got=%d", 0, len(rows))
+			}
+		})
+	}
+}
+
+func TestOutbox_RabbitMQWithPostgres_withBadData(t *testing.T) {
+	logger := zap.NewNop()
+
+	qn, ex, rKey := "test.outbox.queue", "test.outbox.exchange", "test.outbox.rKey"
+	_, closer := setup(t, qn, ex, rKey)
+	defer closer()
+
+	expectedMessages := make([]string, 5)
+	for i := 0; i < 5; i++ {
+		expectedMessages[i] = uniqueString("HelloRabbitMQ")
+	}
+
+	// DB setup
+	outboxTable := uniqueString("outbox")
+	db, dbCleaner := setupPostgres(t, outboxTable)
+	defer dbCleaner()
+
+	for _, m := range expectedMessages {
+		populateOutboxTable(t, db, outboxTable, []event.OutboxRow{
+			{
+				Metadata: event.Metadata{
+					RabbitCfg: &event.RabbitCfg{
+						Exchange:   ex,
+						RoutingKey: rKey,
+						Mandatory:  false,
+						Immediate:  false,
+						Publishing: amqp.Publishing{
+							ContentType:  jsonType,
+							Timestamp:    time.Now().UTC(),
+							Body:         []byte(m),
+							DeliveryMode: amqp.Transient,
+						},
+					},
+				},
+				Payload: []byte(m),
+			},
+		})
+	}
+
+	// Minesweeper
+	pg, err := datastore.NewPostgres(db, outboxTable, zap.NewNop())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Dispatcher
+	rabbitMQ, err := backend.NewRabbitMQ(
+		amqpURL,
+		pg,
+		logger,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rabbitMQ.Close()
+
+	// Worker
+	w := outbox_worker.Worker{
+		MineSweeper:  pg,
+		Dispatcher:   rabbitMQ,
+		Logger:       logger,
+		MineInterval: 1 * time.Millisecond,
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{}, 1)
+	defer cancel()
+
+	go w.Start(ctx, done)
+
+	time.Sleep(100 * time.Millisecond)
+
+	// assert outbox table count to be zero.
+	rows, err := getRowsFromOutboxTable(db, outboxTable)
+	if err != nil {
+		t.Errorf("getRowsFromOutboxTable error expected=%v, got=%v", nil, err)
+	}
+
+	if len(rows) != 0 {
+		t.Errorf("rows expected=%d, got=%d", 0, len(rows))
+	}
+
+	cancel()
+	<-done
+}
+
+func newConnection(t testing.TB) *amqp.Connection {
+	t.Helper()
+
+	conn, err := amqp.Dial(getURLFromEnv(t))
+	assert.NoError(t, err)
+
+	return conn
+}
+
+func getURLFromEnv(tb testing.TB) string {
+	tb.Helper()
+	return os.Getenv("BACKEND_URL")
+}
+
+func setup(t testing.TB, qn, ex, rKey string) (*amqp.Channel, func() error) {
+	conn := newConnection(t)
+	ch, _ := conn.Channel()
+	declareExchange(t, ch, ex)
+	q, closeFn := declareQueue(t, ch, qn)
+
+	if !(qn == "" || ex == "" || rKey == "") {
+		assert.NoError(t, ch.QueueBind(q.Name, rKey, ex, false, nil))
+	}
+
+	return ch, func() error {
+		closeFn()
+		ch.Close()
+		return conn.Close()
+	}
+}
+
+func declareExchange(t testing.TB, ch *amqp.Channel, ex string) {
+	if ex == "" {
+		t.Log("no exchange given")
+		return
+	}
+
+	assert.NoError(t, ch.ExchangeDeclare(ex, amqp.ExchangeTopic, true, false, false, false, nil))
+}
+
+func declareQueue(t testing.TB, ch *amqp.Channel, qn string) (amqp.Queue, func()) {
+	if qn == "" {
+		t.Log("no queue name given")
+		return amqp.Queue{}, func() {}
+	}
+
+	q, err := ch.QueueDeclare(qn, true, false, false, false, nil)
+	assert.NoError(t, err)
+
+	return q, func() {
+		_, err := ch.QueueDelete(q.Name, false, false, false)
+		assert.NoError(t, err)
+	}
+}
 
 type SQSQueueParam struct {
 	QueueURL *string
@@ -339,12 +521,12 @@ func setupSQS(t *testing.T) *sqs.SQS {
 	return sqs.New(sess, aws.NewConfig().WithEndpoint(sqsHost).WithRegion("eu-central-1"))
 }
 
-func unique() int {
-	return time.Now().Nanosecond()
+func uniqueString(str string) string {
+	return fmt.Sprintf("%s_%d", str, time.Now().Nanosecond())
 }
 
 func createSQSQueue(t *testing.T, sqsService *sqs.SQS) (*sqs.CreateQueueOutput, func()) {
-	qName := fmt.Sprintf("%s-%d", "test-oubox-sqs", unique())
+	qName := uniqueString("test-outbox-sqs")
 	out, err := sqsService.CreateQueue(&sqs.CreateQueueInput{
 		QueueName: aws.String(qName),
 	})
@@ -361,34 +543,34 @@ func createSQSQueue(t *testing.T, sqsService *sqs.SQS) (*sqs.CreateQueueOutput, 
 	return out, cleaner
 }
 
-func setupPostgres(t *testing.T) (*sql.DB, func()) {
+func setupPostgres(t *testing.T, outboxTable string) (*sql.DB, func()) {
 	// Create the outbox table
 
 	db, err := sql.Open("postgres", os.Getenv("DB_URL"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	dropTableIfExists := `DROP TABLE IF EXISTS outbox;`
+	dropTableIfExists := fmt.Sprintf(`DROP TABLE IF EXISTS %s`, outboxTable)
 	_, err = db.ExecContext(context.TODO(), dropTableIfExists)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	createTable := `CREATE TABLE outbox(
+	createTable := fmt.Sprintf(`CREATE TABLE %s(
 id SERIAL,
 metadata bytea,
 payload bytea,
 status integer,
 created_at timestamp,
-deleted_at timestamp);
-`
+deleted_at timestamp)
+`, outboxTable)
 	_, err = db.ExecContext(context.TODO(), createTable)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	return db, func() {
-		_, err := db.Exec(`DROP TABLE OUTBOX;`)
+		_, err := db.Exec(fmt.Sprintf(`DROP TABLE %s;`, outboxTable))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -397,10 +579,10 @@ deleted_at timestamp);
 	}
 }
 
-func populateOutboxTable(t *testing.T, db *sql.DB, rows []event.OutboxRow) {
+func populateOutboxTable(t *testing.T, db *sql.DB, outboxTable string, rows []event.OutboxRow) {
 	t.Helper()
 
-	insertQuery := `INSERT INTO outbox(metadata, payload) VALUES($1,$2)`
+	insertQuery := fmt.Sprintf(`INSERT INTO %s(metadata, payload) VALUES($1,$2)`, outboxTable)
 	preparedStmt, err := db.Prepare(insertQuery)
 	if err != nil {
 		t.Fatal(err)
@@ -415,8 +597,8 @@ func populateOutboxTable(t *testing.T, db *sql.DB, rows []event.OutboxRow) {
 	}
 }
 
-func getRowsFromOutboxTable(db *sql.DB) ([]event.OutboxRow, error) {
-	q := `select id, metadata, payload, status from outbox`
+func getRowsFromOutboxTable(db *sql.DB, outboxTable string) ([]event.OutboxRow, error) {
+	q := fmt.Sprintf(`select id, metadata, payload, status from %s`, outboxTable)
 	var (
 		outboxRows []event.OutboxRow
 		err        error
