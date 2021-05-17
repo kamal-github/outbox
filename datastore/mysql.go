@@ -91,7 +91,7 @@ func (p MySQL) onSuccess(ctx context.Context, ids []int) error {
 	const errPrefix = "MySQL.onSuccess"
 
 	q := fmt.Sprintf(
-		`DELETE FROM %s WHERE id IN %s`, p.table, buildPlaceholders(len(ids)),
+		`DELETE FROM %s WHERE id IN (%s)`, p.table, buildPlaceholders(len(ids)),
 	)
 
 	res, err := p.db.ExecContext(ctx, q, mapIntSliceInterfaceSlice(ids)...)

@@ -4,134 +4,139 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
-	"sync"
 
+	"github.com/angora-go/angora"
 	"github.com/kamal-github/outbox/event"
-	"github.com/kamal-github/outbox/internal/backoff"
 	"github.com/streadway/amqp"
 	"go.uber.org/zap"
 )
 
 type RabbitMQ struct {
 	backendURL string
-
-	tls         *tls.Config
-	connectionM sync.RWMutex
-	conn        *amqp.Connection
-	ch          *amqp.Channel
-
-	amqpErrCh    chan *amqp.Error
-	pubConfirmCh chan *amqp.Confirmation
+	tls        *tls.Config
+	conn       *angora.Connection
+	sweeper    Sweeper
 
 	logger *zap.Logger
 }
 
+const outboxID = "outboxID"
+
 // Dispatch relays the message to RabbitMQ exchange.
-func (r *RabbitMQ) Dispatch(ctx context.Context, rows []event.OutboxRow) (SuccessIDs, FailedIDs, error) {
-	successIDs := make([]int, 0)
-	failedIDs := make([]int, 0)
+// Successful publish is considered when publish confirm is received, and then sweeper sweeps the successful outbox rows.
+// Failed to publish are immediately marked as "Failed" by sweeper.
+func (r *RabbitMQ) Dispatch(ctx context.Context, rows []event.OutboxRow) (err error) {
+	var failedIDs []int
 
 	for _, row := range rows {
 		cfg := row.Metadata.RabbitCfg
-		r.connectionM.RLock()
-		if err := r.ch.Publish(cfg.Exchange, cfg.RoutingKey, cfg.Mandatory, cfg.Immediate, cfg.Publishing); err != nil {
+		if cfg == nil {
 			failedIDs = append(failedIDs, row.OutboxID)
 			continue
 		}
-		r.connectionM.RUnlock()
 
-		successIDs = append(successIDs, row.OutboxID)
+		// Adding outbox id to the header so as to identify which outbox row is
+		// publisher confirmation ACKed.
+		h := amqp.Table{outboxID: row.OutboxID}
+		cfg.Publishing.Headers = h
+
+		if err = r.conn.Publish(
+			ctx,
+			cfg.Exchange,
+			angora.ProducerConfig{
+				RoutingKey: cfg.RoutingKey,
+				Mandatory:  cfg.Mandatory,
+				Immediate:  cfg.Immediate,
+			},
+			cfg.Publishing,
+		); err != nil {
+			failedIDs = append(failedIDs, row.OutboxID)
+			continue
+		}
 	}
 
-	return successIDs, failedIDs, nil
+	return r.sweeper.Sweep(ctx, nil, failedIDs)
 }
 
+// Close gracefully closes the underlying amqp.Connection through angora.
 func (r *RabbitMQ) Close() error {
-	return r.conn.Close()
+	return r.conn.Shutdown(context.Background())
 }
 
 type Option func(mq *RabbitMQ) error
 
 func WithTLS(t *tls.Config) Option {
-	return func(mq *RabbitMQ) error {
+	return func(r *RabbitMQ) error {
 		if t == nil {
 			return fmt.Errorf("invalid tls config, %v", t)
 		}
 
-		mq.tls = t
+		r.tls = t
 
 		return nil
 	}
 }
 
-// NewRabbitMQ creates a RabbitMQ dispatcher
-func NewRabbitMQ(backendURL string, logger *zap.Logger, opts ...Option) (Dispatcher, error) {
+// NewRabbitMQ creates a RabbitMQ dispatcher.
+func NewRabbitMQ(amqpURL string, sw Sweeper, logger *zap.Logger, opts ...Option) (*RabbitMQ, error) {
+	var err error
+
 	r := &RabbitMQ{
-		backendURL: backendURL,
-		amqpErrCh:  make(chan *amqp.Error, 1),
+		backendURL: amqpURL,
 		logger:     logger,
+		sweeper:    sw,
 	}
 
-	angora.
-
 	for _, o := range opts {
-		if err := o(r); err != nil {
+		if err = o(r); err != nil {
 			return nil, err
 		}
 	}
 
-	go r.reconnect()
+	onPubConfirmAckFn := func(pub interface{}, ack bool) {
+		var (
+			up angora.UnconfirmedPub
+			ok bool
+		)
+
+		if up, ok = pub.(angora.UnconfirmedPub); !ok {
+			logger.Error("received invalid type, expected UnconfirmedPub")
+		}
+
+		var oid int
+		id := up.Publishing.Headers[outboxID]
+		if oid, ok = id.(int); !ok {
+			logger.Error("received invalid type, expected int for outbox id")
+		}
+
+		var successIDs, failedIDs []int
+		if ack {
+			successIDs = append(successIDs, oid)
+		} else {
+			failedIDs = append(failedIDs, oid)
+		}
+
+		if err := r.sweeper.Sweep(context.Background(), successIDs, failedIDs); err != nil {
+			logger.Error("failed to sweep", zap.Ints("successIDs", successIDs), zap.Ints("failedID", failedIDs), zap.Bool("Ack", ack))
+		}
+	}
+
+	angOpts := []angora.Option{
+		angora.WithChannelPool(),
+		angora.WithPublishConfirm(onPubConfirmAckFn),
+	}
+
+	if r.tls != nil {
+		angOpts = append(angOpts, angora.WithTLSConfig(r.tls))
+	}
+
+	r.conn, err = angora.NewConnection(
+		amqpURL,
+		angOpts...,
+	)
+	if err != nil {
+		return nil, err
+	}
 
 	return r, nil
-}
-
-func (r *RabbitMQ) reconnect() {
-	var retried int
-
-	for {
-		if !r.connect() {
-			retried++
-			backoff.ExponentialWait(retried, 20)
-			continue
-		}
-
-		select {
-		case <-r.amqpErrCh:
-		}
-	}
-}
-
-func (r *RabbitMQ) connect() bool {
-	if err := r.open(); err != nil {
-		return false
-	}
-
-	return true
-}
-
-// open dials to Rabbit Server and creates a connection and set it
-// to client.Connection.
-//
-// This also sets up a ConnectionClose notifier.
-func (r *RabbitMQ) open() error {
-	conn, err := amqp.DialTLS(r.backendURL, nil)
-	if err != nil {
-		return fmt.Errorf("client: cannot dial amqp connection: %w", err)
-	}
-
-	// Note - Create a new chan, as the old chan got closed on RabbitMQ server shutdown or
-	// during the connection/channel close. so a new *amqp.Error chan is required.
-	r.amqpErrCh = make(chan *amqp.Error, 1)
-
-	r.connectionM.Lock()
-	defer r.connectionM.Unlock()
-
-	r.conn = conn
-	r.ch, err = conn.Channel()
-	if err != nil {
-		return err
-	}
-	r.ch.NotifyClose(r.amqpErrCh)
-
-	return nil
 }

@@ -43,7 +43,7 @@ func TestPostgres_Mine(t *testing.T) {
 					rows := sqlmock.NewRows([]string{"id", "metadata", "payload"})
 					rows = rows.AddRow(1, m, nil)
 
-					mock.ExpectQuery("select").WillReturnRows(rows)
+					mock.ExpectQuery("UPDATE").WillReturnRows(rows)
 
 					return db
 				}(),
@@ -79,7 +79,7 @@ func TestPostgres_Mine(t *testing.T) {
 					rows = rows.AddRow(1, m1, nil)
 					rows = rows.AddRow(2, m2, nil)
 
-					mock.ExpectQuery("select").WillReturnRows(rows)
+					mock.ExpectQuery("UPDATE").WillReturnRows(rows)
 
 					return db
 				}(),
@@ -122,7 +122,7 @@ func TestPostgres_Mine(t *testing.T) {
 					rows := sqlmock.NewRows([]string{"id", "metadata", "payload"})
 					rows = rows.AddRow(1, m, nil)
 
-					mock.ExpectQuery("select").WillReturnRows(rows)
+					mock.ExpectQuery("UPDATE").WillReturnRows(rows)
 
 					return db
 				}(),
@@ -141,7 +141,7 @@ func TestPostgres_Mine(t *testing.T) {
 						t.Fatalf("an error '%s' was not expected when opening a stub database connection", err)
 					}
 
-					mock.ExpectQuery("select").WillReturnError(sql.ErrNoRows)
+					mock.ExpectQuery("UPDATE").WillReturnError(sql.ErrNoRows)
 
 					return db
 				}(),

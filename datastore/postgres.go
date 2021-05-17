@@ -36,10 +36,10 @@ func (p Postgres) Close() error {
 
 func (p Postgres) Mine(ctx context.Context) ([]event.OutboxRow, error) {
 	q := fmt.Sprintf(
-		"select id, metadata, payload from %s where status IS NULL", p.table,
+		`UPDATE %s SET status=$1 WHERE status IS NULL RETURNING id, metadata, payload`, p.table,
 	)
 
-	rows, err := p.db.QueryContext(ctx, q)
+	rows, err := p.db.QueryContext(ctx, q, InProcess)
 	if err == sql.ErrNoRows {
 		return nil, ErrNoEvents
 	}

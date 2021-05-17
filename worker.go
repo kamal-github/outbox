@@ -13,8 +13,9 @@ import (
 type Worker struct {
 	MineSweeper  datastore.MineSweeper
 	Dispatcher   backend.Dispatcher
-	Logger       *zap.Logger
 	MineInterval time.Duration
+
+	Logger *zap.Logger
 }
 
 func (w Worker) Start(ctx context.Context, done chan<- struct{}) {
@@ -42,15 +43,8 @@ func (w Worker) Start(ctx context.Context, done chan<- struct{}) {
 			continue
 		}
 
-		relayedIDs, failedIDs, err := w.Dispatcher.Dispatch(ctx, events)
-		if err != nil {
+		if err = w.Dispatcher.Dispatch(ctx, events); err != nil {
 			w.Logger.Error("failed while sending event to Dispatcher", zap.Error(err), zap.String("backend", "rabbitmq"))
-			// increase counter for metrics
-			continue
-		}
-
-		if err := w.MineSweeper.Sweep(ctx, relayedIDs, failedIDs); err != nil {
-			w.Logger.Error("failed while cleaning up events from datastore", zap.Error(err))
 			// increase counter for metrics
 			continue
 		}

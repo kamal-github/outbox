@@ -13,11 +13,15 @@ const (
 )
 
 type (
-	SuccessIDs []int
-	FailedIDs  []int
+	DispatchedIDs []int
+	FailedIDs     []int
 )
 
 type Dispatcher interface {
-	Dispatch(ctx context.Context, rows []event.OutboxRow) (SuccessIDs, FailedIDs, error)
+	Dispatch(ctx context.Context, rows []event.OutboxRow) error
 	io.Closer
+}
+
+type Sweeper interface {
+	Sweep(ctx context.Context, relayedIDs []int, failedIDs []int) error
 }
