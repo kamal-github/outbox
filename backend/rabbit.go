@@ -93,20 +93,20 @@ func NewRabbitMQ(amqpURL string, sw Sweeper, logger *zap.Logger, opts ...Option)
 		}
 	}
 
-	onPubConfirmAckFn := func(deliveryTaggedData interface{}, ack bool) {
+	onPubConfirmAckFn := func(pub interface{}, ack bool) {
 		var (
-			data angora.UnconfirmedPub
-			ok   bool
+			up angora.UnconfirmedPub
+			ok bool
 		)
 
-		if data, ok = deliveryTaggedData.(angora.UnconfirmedPub); !ok {
-			panic("wrong delivery")
+		if up, ok = pub.(angora.UnconfirmedPub); !ok {
+			logger.Error("received invalid type, expected UnconfirmedPub")
 		}
 
 		var oid int
-		id := data.Publishing.Headers[outboxID]
+		id := up.Publishing.Headers[outboxID]
 		if oid, ok = id.(int); !ok {
-			panic("invalid id type")
+			logger.Error("received invalid type, expected int for outbox id")
 		}
 
 		var successIDs, failedIDs []int

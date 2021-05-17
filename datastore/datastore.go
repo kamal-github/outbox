@@ -13,8 +13,8 @@ var ErrNoEvents = errors.New("no events")
 type Status int
 
 const (
-	Failed Status = iota + 1
-	InProcess
+	InProcess Status = iota + 1
+	Failed
 )
 
 type MineSweeper interface {
