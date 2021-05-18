@@ -9,7 +9,6 @@ import (
 
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/kamal-github/outbox/event"
-
 	"go.uber.org/zap"
 )
 
@@ -31,20 +30,37 @@ func NewMySQL(db *sql.DB, table string, logger *zap.Logger) (MineSweeper, error)
 	}, nil
 }
 
-func (p MySQL) Mine(ctx context.Context) ([]event.OutboxRow, error) {
-	q := fmt.Sprintf(
-		"select id, metadata, payload from %s where status IS NULL", p.table,
+func (p MySQL) Mine(ctx context.Context) (outboxRows []event.OutboxRow, err error) {
+	selectQuery := fmt.Sprintf(`SELECT id, metadata, payload FROM %s WHERE status IS NULL FOR UPDATE`, p.table)
+	updateQuery := fmt.Sprintf(
+		`UPDATE %s SET status=? where STATUS IS NULL`, p.table,
 	)
 
-	rows, err := p.db.QueryContext(ctx, q)
+	tx, err := p.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if err != nil {
+			tx.Rollback()
+		}
+	}()
+
+	rows, err := tx.QueryContext(ctx, selectQuery)
 	if err == sql.ErrNoRows {
 		return nil, ErrNoEvents
 	}
 	if err != nil {
 		return nil, err
 	}
+	defer rows.Close()
 
-	outboxRows := make([]event.OutboxRow, 0)
+	_, err = tx.ExecContext(ctx, updateQuery, Failed)
+	if err != nil {
+		return nil, err
+	}
+
+	tx.Commit()
 
 	for rows.Next() {
 		var or event.OutboxRow
@@ -55,17 +71,11 @@ func (p MySQL) Mine(ctx context.Context) ([]event.OutboxRow, error) {
 
 		outboxRows = append(outboxRows, or)
 	}
-
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
 
 	return outboxRows, nil
-
 }
 
 func (p MySQL) Sweep(ctx context.Context, relayedIDs []int, failedIDs []int) error {
