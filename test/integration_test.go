@@ -21,219 +21,274 @@ import (
 	"go.uber.org/zap"
 )
 
-func TestOutbox_SQSWithPostgres_success(t *testing.T) {
+func TestOutbox_SQSWithPostgres(t *testing.T) {
 	t.Parallel()
+
 	logger := zap.NewNop()
-
-	// SQS setup
 	sqsConn := setupSQS(t)
-	createQueueOutput, queueCleaner := createSQSQueue(t, sqsConn)
-	defer queueCleaner()
 
-	expectedMessages := make([]string, 5)
-	for i := 0; i < 5; i++ {
-		expectedMessages[i] = uniqueString("HelloSQS")
-	}
-
-	// DB setup
-	outboxTable := uniqueString("outbox")
-	db, dbCleaner := setupPostgres(t, outboxTable)
-	defer dbCleaner()
-
-	for _, m := range expectedMessages {
-		populateOutboxTable(t, db, outboxTable, []event.OutboxRow{
-			{
-				Metadata: event.Metadata{
-					SQSCfg: &event.SQSCfg{
-						&sqs.SendMessageInput{
-							MessageBody: aws.String(m),
-							QueueUrl:    createQueueOutput.QueueUrl,
+	tests := []struct {
+		name              string
+		events            func() ([]event.OutboxRow, func())
+		expectedRowsCount int
+		outboxStatus      datastore.Status
+	}{
+		{
+			name: "it successfully publishes and remove the rows from DB",
+			events: func() ([]event.OutboxRow, func()) {
+				createQueueOutput, queueCleaner := createSQSQueue(t, sqsConn)
+				rows := make([]event.OutboxRow, 5)
+				for i := 0; i < 5; i++ {
+					rows[i] = event.OutboxRow{
+						Metadata: event.Metadata{
+							SQSCfg: &event.SQSCfg{
+								SendMessageInput: &sqs.SendMessageInput{
+									MessageBody: aws.String(uniqueString("Hello from Outbox")),
+									QueueUrl:    createQueueOutput.QueueUrl,
+								},
+							},
 						},
-					},
-				},
+					}
+				}
+
+				return rows, queueCleaner
 			},
-		}, DOLLAR)
+			expectedRowsCount: 0,
+		},
+		{
+			name: "it keeps the rows in `InProcess` status for rows with invalid Metadata",
+			events: func() ([]event.OutboxRow, func()) {
+				rows := make([]event.OutboxRow, 3)
+				for i := 0; i < 3; i++ {
+					rows[i] = event.OutboxRow{
+						Metadata: event.Metadata{
+							SQSCfg: nil,
+						},
+					}
+				}
+				return rows, func() {}
+			},
+			expectedRowsCount: 3,
+			outboxStatus:      datastore.Failed,
+		},
 	}
 
-	// Minesweeper
-	pg, err := datastore.NewPostgres(db, outboxTable, zap.NewNop())
-	if err != nil {
-		t.Fatal(err)
-	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 
-	// Dispatch
-	simpleQueueService, err := backend.NewSimpleQueueService(sqsConn, pg, logger)
-	if err != nil {
-		t.Fatal(err)
-	}
+			// DB setup
+			outboxTable := uniqueString("outbox")
+			db, dbCleaner := setupPostgres(t, outboxTable)
+			defer dbCleaner()
 
-	// Worker
-	w := outbox_worker.Worker{
-		MineSweeper:  pg,
-		Dispatcher:   simpleQueueService,
-		Logger:       logger,
-		MineInterval: 1 * time.Millisecond,
-	}
+			events, queueCleaner := tt.events()
+			defer queueCleaner()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan struct{}, 1)
-	defer cancel()
+			populateOutboxTable(t, db, outboxTable, events, DOLLAR)
 
-	go w.Start(ctx, done)
+			// Minesweeper
+			pg, err := datastore.NewPostgres(db, outboxTable, zap.NewNop())
+			if err != nil {
+				t.Error(err)
+			}
 
-	// assert the consumption of messages from SQS Queue
-	// for count and message body.
-	for i := 0; i < len(expectedMessages); i++ {
-		recOut, err := sqsConn.ReceiveMessage(&sqs.ReceiveMessageInput{
-			WaitTimeSeconds:     aws.Int64(2),
-			MaxNumberOfMessages: aws.Int64(1),
-			QueueUrl:            createQueueOutput.QueueUrl,
+			// Dispatcher
+			simpleQueueService, err := backend.NewSimpleQueueService(sqsConn, pg, logger)
+			if err != nil {
+				t.Error(err)
+			}
+
+			// Worker
+			w := outbox_worker.Worker{
+				MineSweeper:  pg,
+				Dispatcher:   simpleQueueService,
+				Logger:       logger,
+				MineInterval: 1 * time.Millisecond,
+			}
+
+			ctx, cancel := context.WithCancel(context.Background())
+			done := make(chan struct{}, 1)
+			defer cancel()
+
+			go w.Start(ctx, done)
+
+			//assert the consumption of messages from SQS Queue for count
+			for _, e := range events {
+				var queueURL *string
+				if e.Metadata.SQSCfg == nil {
+					continue
+				}
+				queueURL = e.Metadata.SQSCfg.QueueUrl
+				_, err := sqsConn.ReceiveMessage(&sqs.ReceiveMessageInput{
+					MaxNumberOfMessages: aws.Int64(1),
+					QueueUrl:            queueURL,
+				})
+				if err != nil {
+					t.Errorf("receiveMessage: expected=%v,got error=%v", nil, err)
+				}
+			}
+
+			time.Sleep(100 * time.Millisecond)
+
+			// assert outbox table count to be zero.
+			rows, err := getRowsFromOutboxTable(db, outboxTable)
+			if err != nil {
+				if err == sql.ErrNoRows {
+					t.Errorf("getRowsFromOutboxTable error expected=%v, got=%v", nil, err)
+				}
+
+				t.Error(err)
+			}
+			if len(rows) != tt.expectedRowsCount {
+				t.Errorf("rows expected=%d, got=%d", tt.expectedRowsCount, len(rows))
+			}
+			for _, r := range rows {
+				if r.Status.Int64 != int64(tt.outboxStatus) {
+					t.Errorf("status expected=%v, got=%v", tt.outboxStatus, r.Status.Int64)
+				}
+			}
+
+			cancel()
+			<-done
+
 		})
-		if err != nil {
-			t.Errorf("expected=%v,got error=%v", nil, err)
-		}
-		if !contains(t, expectedMessages, *recOut.Messages[0].Body) {
-			t.Errorf("expected=%v,got=%v", "HelloSQS", *recOut.Messages[0].Body)
-		}
 	}
-
-	// assert outbox table count to be zero.
-	rows, err := getRowsFromOutboxTable(db, outboxTable)
-	if err != nil {
-		t.Errorf("getRowsFromOutboxTable error expected=%v, got=%v", nil, err)
-	}
-
-	if len(rows) != 0 {
-		t.Errorf("rows expected=%d, got=%d", 0, len(rows))
-	}
-
-	cancel()
-	<-done
 }
 
-func TestOutbox_SQSWithPostgres_withBadData(t *testing.T) {
+func TestOutbox_SQSWithMySQL(t *testing.T) {
 	t.Parallel()
+
 	logger := zap.NewNop()
-
-	// SQS setup
 	sqsConn := setupSQS(t)
-	createQueueOutput, queueCleaner := createSQSQueue(t, sqsConn)
-	defer queueCleaner()
 
-	expectedMessages := make([]string, 5)
-	for i := 0; i < 5; i++ {
-		expectedMessages[i] = uniqueString("HelloSQS")
-	}
-
-	params := make([]SQSQueueParam, len(expectedMessages))
-	for i, m := range expectedMessages {
-		params[i] = SQSQueueParam{
-			QueueURL: createQueueOutput.QueueUrl,
-			Body:     aws.String(m),
-		}
-	}
-
-	// DB setup
-	outboxTable := uniqueString("outbox")
-	db, dbCleaner := setupPostgres(t, outboxTable)
-	defer dbCleaner()
-
-	for _, m := range expectedMessages {
-		populateOutboxTable(t, db, outboxTable, []event.OutboxRow{
-			{
-				Metadata: event.Metadata{
-					SQSCfg: &event.SQSCfg{
-						&sqs.SendMessageInput{
-							MessageBody: aws.String(m),
-							QueueUrl:    createQueueOutput.QueueUrl,
+	tests := []struct {
+		name              string
+		events            func() ([]event.OutboxRow, func())
+		expectedRowsCount int
+		outboxStatus      datastore.Status
+	}{
+		{
+			name: "it successfully publishes and remove the rows from DB",
+			events: func() ([]event.OutboxRow, func()) {
+				createQueueOutput, queueCleaner := createSQSQueue(t, sqsConn)
+				rows := make([]event.OutboxRow, 5)
+				for i := 0; i < 5; i++ {
+					rows[i] = event.OutboxRow{
+						Metadata: event.Metadata{
+							SQSCfg: &event.SQSCfg{
+								SendMessageInput: &sqs.SendMessageInput{
+									MessageBody: aws.String(uniqueString("Hello from Outbox")),
+									QueueUrl:    createQueueOutput.QueueUrl,
+								},
+							},
 						},
-					},
-				},
-			},
-		}, DOLLAR)
-	}
+					}
+				}
 
-	// adding intentional bad messages
-	populateOutboxTable(t, db, outboxTable, []event.OutboxRow{
-		{
-			Metadata: event.Metadata{
-				SQSCfg: nil,
+				return rows, queueCleaner
 			},
+			expectedRowsCount: 0,
 		},
 		{
-			// Empty queue URL
-			Metadata: event.Metadata{
-				SQSCfg: &event.SQSCfg{
-					&sqs.SendMessageInput{
-						MessageBody: aws.String("Corono Virus is gonna be over very soon!"),
-					},
-				},
+			name: "it keeps the rows in `InProcess` status for rows with invalid Metadata",
+			events: func() ([]event.OutboxRow, func()) {
+				rows := make([]event.OutboxRow, 3)
+				for i := 0; i < 3; i++ {
+					rows[i] = event.OutboxRow{
+						Metadata: event.Metadata{
+							SQSCfg: nil,
+						},
+					}
+				}
+				return rows, func() {}
 			},
+			expectedRowsCount: 3,
+			outboxStatus:      datastore.Failed,
 		},
-	}, DOLLAR)
-
-	// Minesweeper
-	pg, err := datastore.NewPostgres(db, outboxTable, zap.NewNop())
-	if err != nil {
-		t.Fatal(err)
 	}
 
-	// Dispatch
-	simpleQueueService, err := backend.NewSimpleQueueService(sqsConn, pg, logger)
-	if err != nil {
-		t.Fatal(err)
-	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 
-	// Worker
-	w := outbox_worker.Worker{
-		MineSweeper:  pg,
-		Dispatcher:   simpleQueueService,
-		Logger:       logger,
-		MineInterval: 1 * time.Millisecond,
-	}
+			// DB setup
+			outboxTable := uniqueString("outbox")
+			db, dbCleaner := setupMySQL(t, outboxTable)
+			defer dbCleaner()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan struct{}, 1)
-	defer cancel()
+			events, queueCleaner := tt.events()
+			defer queueCleaner()
 
-	go w.Start(ctx, done)
+			populateOutboxTable(t, db, outboxTable, events, QUESTION)
 
-	// assert the consumption of messages from SQS Queue
-	// for count and message body.
-	for i := 0; i < len(expectedMessages); i++ {
-		recOut, err := sqsConn.ReceiveMessage(&sqs.ReceiveMessageInput{
-			WaitTimeSeconds:     aws.Int64(2),
-			MaxNumberOfMessages: aws.Int64(1),
-			QueueUrl:            createQueueOutput.QueueUrl,
+			// Minesweeper
+			pg, err := datastore.NewMySQL(db, outboxTable, zap.NewNop())
+			if err != nil {
+				t.Error(err)
+			}
+
+			// Dispatcher
+			simpleQueueService, err := backend.NewSimpleQueueService(sqsConn, pg, logger)
+			if err != nil {
+				t.Error(err)
+			}
+
+			// Worker
+			w := outbox_worker.Worker{
+				MineSweeper:  pg,
+				Dispatcher:   simpleQueueService,
+				Logger:       logger,
+				MineInterval: 1 * time.Millisecond,
+			}
+
+			ctx, cancel := context.WithCancel(context.Background())
+			done := make(chan struct{}, 1)
+			defer cancel()
+
+			go w.Start(ctx, done)
+
+			//assert the consumption of messages from SQS Queue for count
+			for _, e := range events {
+				var queueURL *string
+				if e.Metadata.SQSCfg == nil {
+					continue
+				}
+				queueURL = e.Metadata.SQSCfg.QueueUrl
+				_, err := sqsConn.ReceiveMessage(&sqs.ReceiveMessageInput{
+					MaxNumberOfMessages: aws.Int64(1),
+					QueueUrl:            queueURL,
+				})
+				if err != nil {
+					t.Errorf("receiveMessage: expected=%v,got error=%v", nil, err)
+				}
+			}
+
+			time.Sleep(100 * time.Millisecond)
+
+			// assert outbox table count to be zero.
+			rows, err := getRowsFromOutboxTable(db, outboxTable)
+			if err != nil {
+				if err == sql.ErrNoRows {
+					t.Errorf("getRowsFromOutboxTable error expected=%v, got=%v", nil, err)
+				}
+
+				t.Error(err)
+			}
+			if len(rows) != tt.expectedRowsCount {
+				t.Errorf("rows expected=%d, got=%d", tt.expectedRowsCount, len(rows))
+			}
+			for _, r := range rows {
+				if r.Status.Int64 != int64(tt.outboxStatus) {
+					t.Errorf("status expected=%v, got=%v", tt.outboxStatus, r.Status.Int64)
+				}
+			}
+
+			cancel()
+			<-done
+
 		})
-		if err != nil {
-			t.Errorf("expected=%v,got error=%v", nil, err)
-		}
-		if !contains(t, expectedMessages, *recOut.Messages[0].Body) {
-			t.Errorf("expected=%v,got=%v", "HelloSQS", *recOut.Messages[0].Body)
-		}
 	}
-
-	// assert outbox table count to be zero.
-	rows, err := getRowsFromOutboxTable(db, outboxTable)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			t.Errorf("getRowsFromOutboxTable error expected=%v, got=%v", nil, err)
-		}
-
-		t.Fatal(err)
-	}
-	if len(rows) != 2 {
-		t.Errorf("rows expected=%d, got=%d", 2, len(rows))
-	}
-	for _, r := range rows {
-		if r.Status.Int64 != int64(datastore.Failed) {
-			t.Errorf("status expected=%v, got=%v", datastore.Failed, r.Status.Int64)
-		}
-	}
-
-	cancel()
-	<-done
 }
 
 var (
@@ -250,6 +305,7 @@ func TestOutbox_RabbitMQWithPostgres(t *testing.T) {
 		name              string
 		events            func() []event.OutboxRow
 		expectedRowsCount int
+		outboxStatus      datastore.Status
 	}{
 		{
 			name: "it successfully publishes and remove the rows from DB",
@@ -295,6 +351,7 @@ func TestOutbox_RabbitMQWithPostgres(t *testing.T) {
 				return rows
 			},
 			expectedRowsCount: 3,
+			outboxStatus:      datastore.Failed,
 		},
 	}
 
@@ -310,7 +367,7 @@ func TestOutbox_RabbitMQWithPostgres(t *testing.T) {
 			// Minesweeper
 			pg, err := datastore.NewPostgres(db, outboxTable, zap.NewNop())
 			if err != nil {
-				t.Fatal(err)
+				t.Error(err)
 			}
 
 			// Dispatcher
@@ -320,7 +377,7 @@ func TestOutbox_RabbitMQWithPostgres(t *testing.T) {
 				logger,
 			)
 			if err != nil {
-				t.Fatal(err)
+				t.Error(err)
 			}
 			defer rabbitMQ.Close()
 
@@ -349,9 +406,13 @@ func TestOutbox_RabbitMQWithPostgres(t *testing.T) {
 			if err != nil {
 				t.Errorf("getRowsFromOutboxTable error expected=%v, got=%v", nil, err)
 			}
-
 			if len(rows) != tt.expectedRowsCount {
 				t.Errorf("rows expected=%d, got=%d", 0, len(rows))
+			}
+			for _, r := range rows {
+				if r.Status.Int64 != int64(tt.outboxStatus) {
+					t.Errorf("status expected=%v, got=%v", tt.outboxStatus, r.Status.Int64)
+				}
 			}
 		})
 	}
@@ -366,6 +427,7 @@ func TestOutbox_RabbitMQWithMySQL(t *testing.T) {
 		name              string
 		events            func() []event.OutboxRow
 		expectedRowsCount int
+		outboxStatus      datastore.Status
 	}{
 		{
 			name: "it keeps the rows in `InProcess` status for rows with invalid Metadata",
@@ -381,6 +443,7 @@ func TestOutbox_RabbitMQWithMySQL(t *testing.T) {
 				return rows
 			},
 			expectedRowsCount: 3,
+			outboxStatus:      datastore.Failed,
 		},
 		{
 			name: "it successfully publishes and removes the rows from DB",
@@ -426,7 +489,7 @@ func TestOutbox_RabbitMQWithMySQL(t *testing.T) {
 			// Minesweeper
 			mysql, err := datastore.NewMySQL(db, outboxTable, zap.NewNop())
 			if err != nil {
-				t.Fatal(err)
+				t.Error(err)
 			}
 
 			// Dispatcher
@@ -436,7 +499,7 @@ func TestOutbox_RabbitMQWithMySQL(t *testing.T) {
 				logger,
 			)
 			if err != nil {
-				t.Fatal(err)
+				t.Error(err)
 			}
 			defer rabbitMQ.Close()
 
@@ -456,7 +519,7 @@ func TestOutbox_RabbitMQWithMySQL(t *testing.T) {
 
 			go w.Start(ctx, done)
 
-			time.Sleep(100 * time.Millisecond)
+			time.Sleep(200 * time.Millisecond)
 
 			cancel()
 			<-done
@@ -468,6 +531,11 @@ func TestOutbox_RabbitMQWithMySQL(t *testing.T) {
 
 			if len(rows) != tt.expectedRowsCount {
 				t.Errorf("rows expected=%d, got=%d", 0, len(rows))
+			}
+			for _, r := range rows {
+				if r.Status.Int64 != int64(tt.outboxStatus) {
+					t.Errorf("status expected=%v, got=%v", tt.outboxStatus, r.Status.Int64)
+				}
 			}
 		})
 	}
@@ -538,8 +606,7 @@ func setupSQS(t *testing.T) *sqs.SQS {
 
 	sqsHost := os.Getenv("SQS_HOST")
 
-	// Create the SQS queue
-	sess := session.Must(session.NewSessionWithOptions(session.Options{
+	ses := session.Must(session.NewSessionWithOptions(session.Options{
 		SharedConfigState: session.SharedConfigDisable,
 		Config: aws.Config{
 			Credentials: credentials.NewStaticCredentials("test", "test", ""),
@@ -548,7 +615,7 @@ func setupSQS(t *testing.T) *sqs.SQS {
 		},
 	}))
 
-	return sqs.New(sess, aws.NewConfig().WithEndpoint(sqsHost).WithRegion("eu-central-1"))
+	return sqs.New(ses, aws.NewConfig().WithEndpoint(sqsHost).WithRegion("eu-central-1"))
 }
 
 func uniqueString(str string) string {
@@ -561,12 +628,12 @@ func createSQSQueue(t *testing.T, sqsService *sqs.SQS) (*sqs.CreateQueueOutput, 
 		QueueName: aws.String(qName),
 	})
 	if err != nil {
-		t.Fatal(err)
+		t.Error(err)
 	}
 	cleaner := func() {
 		_, err := sqsService.DeleteQueue(&sqs.DeleteQueueInput{QueueUrl: out.QueueUrl})
 		if err != nil {
-			t.Fatal(err)
+			t.Error(err)
 		}
 	}
 
@@ -578,12 +645,12 @@ func setupPostgres(t *testing.T, outboxTable string) (*sql.DB, func()) {
 
 	db, err := sql.Open("postgres", os.Getenv("DB_URL"))
 	if err != nil {
-		t.Fatal(err)
+		t.Error(err)
 	}
 	dropTableIfExists := fmt.Sprintf(`DROP TABLE IF EXISTS %s`, outboxTable)
 	_, err = db.ExecContext(context.TODO(), dropTableIfExists)
 	if err != nil {
-		t.Fatal(err)
+		t.Error(err)
 	}
 
 	createTable := fmt.Sprintf(`CREATE TABLE %s(
@@ -596,13 +663,13 @@ deleted_at timestamp)
 `, outboxTable)
 	_, err = db.ExecContext(context.TODO(), createTable)
 	if err != nil {
-		t.Fatal(err)
+		t.Error(err)
 	}
 
 	return db, func() {
 		_, err := db.Exec(fmt.Sprintf(`DROP TABLE %s;`, outboxTable))
 		if err != nil {
-			t.Fatal(err)
+			t.Error(err)
 		}
 
 		db.Close()
@@ -612,16 +679,13 @@ deleted_at timestamp)
 func setupMySQL(t *testing.T, outboxTable string) (*sql.DB, func()) {
 	db, err := sql.Open("mysql", os.Getenv("MYSQL_URL"))
 	if err != nil {
-		t.Fatal(err)
+		t.Error(err)
 	}
-	_, err = db.Exec("USE test_outbox")
-	if err != nil {
-		t.Fatal(err)
-	}
+
 	dropTableIfExists := fmt.Sprintf(`DROP TABLE IF EXISTS %s`, outboxTable)
 	_, err = db.ExecContext(context.TODO(), dropTableIfExists)
 	if err != nil {
-		t.Fatal(err)
+		t.Error(err)
 	}
 
 	createTable := fmt.Sprintf(`CREATE TABLE %s(
@@ -634,13 +698,13 @@ deleted_at timestamp)
 `, outboxTable)
 	_, err = db.ExecContext(context.TODO(), createTable)
 	if err != nil {
-		t.Fatal(err)
+		t.Error(err)
 	}
 
 	return db, func() {
 		_, err := db.Exec(fmt.Sprintf(`DROP TABLE IF EXISTS %s;`, outboxTable))
 		if err != nil {
-			t.Fatal(err)
+			t.Error(err)
 		}
 
 		db.Close()
@@ -661,14 +725,14 @@ func populateOutboxTable(t *testing.T, db *sql.DB, outboxTable string, rows []ev
 	insertQuery := fmt.Sprintf(`INSERT INTO %s(metadata, payload) VALUES(%s)`, outboxTable, p)
 	preparedStmt, err := db.Prepare(insertQuery)
 	if err != nil {
-		t.Fatal(err)
+		t.Error(err)
 	}
 	defer preparedStmt.Close()
 
 	for _, row := range rows {
 		_, err = preparedStmt.Exec(&row.Metadata, &row.Payload)
 		if err != nil {
-			t.Fatal(err)
+			t.Error(err)
 		}
 	}
 }

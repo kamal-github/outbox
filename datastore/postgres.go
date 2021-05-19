@@ -12,12 +12,14 @@ import (
 	"go.uber.org/zap"
 )
 
+// Postgres represents postgres implementation for MineSweeper.
 type Postgres struct {
 	db     *sql.DB
 	table  string
 	logger *zap.Logger
 }
 
+// NewPostgres constructs Postgres with all dependencies.
 func NewPostgres(db *sql.DB, table string, logger *zap.Logger) (MineSweeper, error) {
 	if db == nil {
 		return Postgres{}, fmt.Errorf("%s: %w", "NewPostgres", errors.New("nil DB"))
@@ -30,10 +32,15 @@ func NewPostgres(db *sql.DB, table string, logger *zap.Logger) (MineSweeper, err
 	}, nil
 }
 
+// Close closes the Postgres DB connection.
 func (p Postgres) Close() error {
 	return p.db.Close()
 }
 
+// Mine fetches and returns all the outbox rows which are ready to publish(having Status IS NULL).
+//
+// Marks the fetched rows Status to InProcess so as to avoid same records being re-fetched in another
+// iteration by Worker.
 func (p Postgres) Mine(ctx context.Context) ([]event.OutboxRow, error) {
 	q := fmt.Sprintf(
 		`UPDATE %s SET status=$1 WHERE status IS NULL RETURNING id, metadata, payload`, p.table,
@@ -71,6 +78,10 @@ func (p Postgres) Mine(ctx context.Context) ([]event.OutboxRow, error) {
 
 }
 
+// Sweep deletes the dispatched outbox rows when successfully published.
+// otherwise marks those records as Failed when failed to publish.
+//
+// It should be called by Messaging system.
 func (p Postgres) Sweep(ctx context.Context, relayedIDs []int, failedIDs []int) error {
 	if err := p.onSuccess(ctx, relayedIDs); err != nil {
 		return err
@@ -82,6 +93,7 @@ func (p Postgres) Sweep(ctx context.Context, relayedIDs []int, failedIDs []int) 
 	return nil
 }
 
+// onSuccess deletes the outbox rows.
 func (p Postgres) onSuccess(ctx context.Context, ids []int) error {
 	if len(ids) == 0 {
 		return nil
@@ -106,6 +118,7 @@ func (p Postgres) onSuccess(ctx context.Context, ids []int) error {
 	return nil
 }
 
+// onFailure marks the outbox rows as Failed.
 func (p Postgres) onFailure(ctx context.Context, ids []int) error {
 	if len(ids) == 0 {
 		return nil

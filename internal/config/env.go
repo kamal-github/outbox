@@ -6,6 +6,7 @@ import (
 	"github.com/kelseyhightower/envconfig"
 )
 
+// ENV maps the Env vars.
 type ENV struct {
 	DBDriver     string        `envconfig:"DB_DRIVER"`
 	DatabaseURL  string        `envconfig:"DB_URL"`
@@ -15,6 +16,7 @@ type ENV struct {
 	MineInterval time.Duration `envconfig:"MINE_INTERVAL"`
 }
 
+// Process loads Environment vars into ENV.
 func Process() (ENV, error) {
 	var e ENV
 	if err := envconfig.Process("", &e); err != nil {
