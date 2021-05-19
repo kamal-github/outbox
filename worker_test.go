@@ -1,1 +1,1 @@
-package outbox_worker_test
+package outbox_test

@@ -12,12 +12,14 @@ import (
 	"go.uber.org/zap"
 )
 
+// MySQL represents mysql implementation for MineSweeper.
 type MySQL struct {
 	db     *sql.DB
 	table  string
 	logger *zap.Logger
 }
 
+// NewMySQL constructs MySQL with all dependencies.
 func NewMySQL(db *sql.DB, table string, logger *zap.Logger) (MineSweeper, error) {
 	if db == nil {
 		return MySQL{}, fmt.Errorf("%s: %w", "NewMySQL", errors.New("nil DB"))
@@ -30,6 +32,9 @@ func NewMySQL(db *sql.DB, table string, logger *zap.Logger) (MineSweeper, error)
 	}, nil
 }
 
+// Mine fetches and returns all the outbox rows which are ready to publish(having Status IS NULL).
+//
+// Marks the fetched rows Status to InProcess so as to avoid same records being re-fetched in another iteration by Worker.
 func (p MySQL) Mine(ctx context.Context) (outboxRows []event.OutboxRow, err error) {
 	selectQuery := fmt.Sprintf(`SELECT id, metadata, payload FROM %s WHERE status IS NULL FOR UPDATE`, p.table)
 	updateQuery := fmt.Sprintf(
@@ -53,15 +58,6 @@ func (p MySQL) Mine(ctx context.Context) (outboxRows []event.OutboxRow, err erro
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-
-	_, err = tx.ExecContext(ctx, updateQuery, Failed)
-	if err != nil {
-		return nil, err
-	}
-
-	tx.Commit()
-
 	for rows.Next() {
 		var or event.OutboxRow
 		if err := rows.Scan(&or.OutboxID, &or.Metadata, &or.Payload); err != nil {
@@ -74,10 +70,24 @@ func (p MySQL) Mine(ctx context.Context) (outboxRows []event.OutboxRow, err erro
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+
+	_, err = tx.ExecContext(ctx, updateQuery, Failed)
+	if err != nil {
+		return nil, err
+	}
+
+	tx.Commit()
 
 	return outboxRows, nil
 }
 
+// Sweep deletes the dispatched outbox rows when successfully published.
+// otherwise marks those records as Failed when failed to publish.
+//
+// It should be called by Messaging system.
 func (p MySQL) Sweep(ctx context.Context, relayedIDs []int, failedIDs []int) error {
 	if err := p.onSuccess(ctx, relayedIDs); err != nil {
 		return err
@@ -89,10 +99,12 @@ func (p MySQL) Sweep(ctx context.Context, relayedIDs []int, failedIDs []int) err
 	return nil
 }
 
+// Close closes the MySQL DB connection.
 func (p MySQL) Close() error {
 	return p.db.Close()
 }
 
+// onSuccess deletes the outbox rows.
 func (p MySQL) onSuccess(ctx context.Context, ids []int) error {
 	if len(ids) == 0 {
 		return nil
@@ -117,6 +129,7 @@ func (p MySQL) onSuccess(ctx context.Context, ids []int) error {
 	return nil
 }
 
+// onFailure marks the outbox rows as Failed.
 func (p MySQL) onFailure(ctx context.Context, ids []int) error {
 	if len(ids) == 0 {
 		return nil

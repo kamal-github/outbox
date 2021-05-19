@@ -1,4 +1,4 @@
-package outbox_worker
+package outbox
 
 import (
 	"context"
@@ -10,6 +10,7 @@ import (
 	"go.uber.org/zap"
 )
 
+// Worker is the outbox worker which runs repeatedly until asked to stop.
 type Worker struct {
 	MineSweeper  datastore.MineSweeper
 	Dispatcher   backend.Dispatcher
@@ -18,6 +19,12 @@ type Worker struct {
 	Logger *zap.Logger
 }
 
+// Start starts the outbox worker and iterative looks for new outbox rows (ready to process)
+// after each given MineInterval and publishes to one of the configured Messaging system.
+//
+// When no ready to process message are found, it keep looking for new ones.
+//
+// Exit as soon as ctx is cancelled.
 func (w Worker) Start(ctx context.Context, done chan<- struct{}) {
 	ticker := time.NewTicker(w.MineInterval)
 	defer ticker.Stop()
@@ -36,7 +43,7 @@ func (w Worker) Start(ctx context.Context, done chan<- struct{}) {
 			w.Logger.Error("failed while Err no event collecting event from datastore", zap.Error(err))
 			continue
 		}
-		// Validation (e.g metadata incorrect format) error or network error.
+		// Validation error (e.g metadata incorrect format) or network error.
 		if err != nil {
 			w.Logger.Error("failed while collecting event from datastore", zap.Error(err))
 			// increase counter for metrics
@@ -46,7 +53,6 @@ func (w Worker) Start(ctx context.Context, done chan<- struct{}) {
 		if err = w.Dispatcher.Dispatch(ctx, events); err != nil {
 			w.Logger.Error("failed while sending event to Dispatcher", zap.Error(err), zap.String("backend", "rabbitmq"))
 			// increase counter for metrics
-			continue
 		}
 	}
 }
