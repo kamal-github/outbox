@@ -1,0 +1,54 @@
+name: Go
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    services:
+      image: mysql:8.0.24
+        restart: always
+        command: --default-authentication-plugin=mysql_native_password
+        environment:
+          - MYSQL_ROOT_PASSWORD=password
+          - MYSQL_USER=user
+          - MYSQL_PASSWORD=password
+          - MYSQL_DATABASE=test_outbox
+      postgres:
+        image: postgres:13.2-alpine
+        container_name: ob-postgres
+        restart: always
+        environment:
+          - POSTGRES_PASSWORD=password
+          - POSTGRES_USER=postgres
+          - POSTGRES_DB=test_outbox
+      rabbit:
+        image: 'rabbitmq:3.8.9-management-alpine'
+      sqs:
+        image: 'localstack/localstack'
+        environment:
+          - SERVICES=sqs
+    steps:
+      - uses: actions/checkout@v2
+      - name: Set up Go
+        uses: actions/setup-go@v2
+        with:
+          go-version: 1.16
+      - name: Build
+        run: go build -v ./...
+      - name: Test
+        run: go test -v -race ./...
+        env:
+          AMQP_URL: amqp://guest:guest@localhost:5672
+          DB_DRIVER: postgres
+          DB_URL: postgres://postgres:password@localhost:54320/test_outbox?sslmode=disable
+          MYSQL_URL: user:password@tcp(:33060)/test_outbox
+          OUTBOX_TABLE: outbox
+          BACKEND: rabbitmq
+          BACKEND_URL: amqp://localhost:56720
+          MINE_INTERVAL: 1s
+          SQS_HOST: http://localhost:45660
