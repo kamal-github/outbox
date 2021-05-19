@@ -10,28 +10,33 @@ jobs:
   build:
     runs-on: ubuntu-latest
     services:
-      image: mysql:8.0.24
-        restart: always
-        command: --default-authentication-plugin=mysql_native_password
-        environment:
-          - MYSQL_ROOT_PASSWORD=password
-          - MYSQL_USER=user
-          - MYSQL_PASSWORD=password
-          - MYSQL_DATABASE=test_outbox
+      mysql:
+        image: mysql:8.0.24
+        ports:
+          - "3306:3306"
+        env:
+          MYSQL_ROOT_PASSWORD: password
+          MYSQL_USER: user
+          MYSQL_PASSWORD: password
+          MYSQL_DATABASE: test_outbox
       postgres:
         image: postgres:13.2-alpine
-        container_name: ob-postgres
-        restart: always
-        environment:
-          - POSTGRES_PASSWORD=password
-          - POSTGRES_USER=postgres
-          - POSTGRES_DB=test_outbox
+        ports:
+          - "5432:5432"
+        env:
+          POSTGRES_PASSWORD: password
+          POSTGRES_USER: postgres
+          POSTGRES_DB: test_outbox
       rabbit:
         image: 'rabbitmq:3.8.9-management-alpine'
+        ports:
+          - "5672:5672"
       sqs:
         image: 'localstack/localstack'
-        environment:
-          - SERVICES=sqs
+        ports:
+          - "4566:4566"
+        env:
+          SERVICES: sqs
     steps:
       - uses: actions/checkout@v2
       - name: Set up Go
@@ -43,12 +48,11 @@ jobs:
       - name: Test
         run: go test -v -race ./...
         env:
-          AMQP_URL: amqp://guest:guest@localhost:5672
-          DB_DRIVER: postgres
-          DB_URL: postgres://postgres:password@localhost:54320/test_outbox?sslmode=disable
-          MYSQL_URL: user:password@tcp(:33060)/test_outbox
-          OUTBOX_TABLE: outbox
-          BACKEND: rabbitmq
-          BACKEND_URL: amqp://localhost:56720
           MINE_INTERVAL: 1s
-          SQS_HOST: http://localhost:45660
+          BACKEND: rabbitmq
+          OUTBOX_TABLE: outbox
+          DB_DRIVER: postgres
+          MYSQL_URL: user:password@tcp(localhost:3306)/test_outbox
+          DB_URL: postgres://postgres:password@localhost:5432/test_outbox?sslmode=disable
+          BACKEND_URL: amqp://guest:guest@localhost:5672
+          SQS_HOST: http://localhost:4566
