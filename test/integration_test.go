@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"os"
 	"testing"
 	"time"
 
@@ -12,14 +11,25 @@ import (
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/sqs"
-	outbox_worker "github.com/kamal-github/outbox"
-	"github.com/kamal-github/outbox/backend"
+	"github.com/kamal-github/outbox"
 	"github.com/kamal-github/outbox/datastore"
 	"github.com/kamal-github/outbox/event"
+	"github.com/kamal-github/outbox/internal/config"
+	"github.com/kamal-github/outbox/pubsub"
 	"github.com/streadway/amqp"
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
 )
+
+var envCfg config.ENV
+
+func init() {
+	var err error
+	envCfg, err = config.Process()
+	if err != nil {
+		panic(err)
+	}
+}
 
 func TestOutbox_SQSWithPostgres(t *testing.T) {
 	t.Parallel()
@@ -94,13 +104,13 @@ func TestOutbox_SQSWithPostgres(t *testing.T) {
 			}
 
 			// Dispatcher
-			simpleQueueService, err := backend.NewSimpleQueueService(sqsConn, pg, logger)
+			simpleQueueService, err := pubsub.NewSimpleQueueService(sqsConn, pg, logger)
 			if err != nil {
 				t.Error(err)
 			}
 
 			// Worker
-			w := outbox_worker.Worker{
+			w := outbox.Worker{
 				MineSweeper:  pg,
 				Dispatcher:   simpleQueueService,
 				Logger:       logger,
@@ -229,13 +239,13 @@ func TestOutbox_SQSWithMySQL(t *testing.T) {
 			}
 
 			// Dispatcher
-			simpleQueueService, err := backend.NewSimpleQueueService(sqsConn, pg, logger)
+			simpleQueueService, err := pubsub.NewSimpleQueueService(sqsConn, pg, logger)
 			if err != nil {
 				t.Error(err)
 			}
 
 			// Worker
-			w := outbox_worker.Worker{
+			w := outbox.Worker{
 				MineSweeper:  pg,
 				Dispatcher:   simpleQueueService,
 				Logger:       logger,
@@ -293,7 +303,6 @@ func TestOutbox_SQSWithMySQL(t *testing.T) {
 
 var (
 	jsonType = "application/json"
-	amqpURL  = os.Getenv("BACKEND_URL")
 )
 
 func TestOutbox_RabbitMQWithPostgres(t *testing.T) {
@@ -371,8 +380,8 @@ func TestOutbox_RabbitMQWithPostgres(t *testing.T) {
 			}
 
 			// Dispatcher
-			rabbitMQ, err := backend.NewRabbitMQ(
-				amqpURL,
+			rabbitMQ, err := pubsub.NewRabbitMQ(
+				envCfg.RabbitMQURI,
 				pg,
 				logger,
 			)
@@ -384,7 +393,7 @@ func TestOutbox_RabbitMQWithPostgres(t *testing.T) {
 			populateOutboxTable(t, db, outboxTable, tt.events(), DOLLAR)
 
 			// Worker
-			w := outbox_worker.Worker{
+			w := outbox.Worker{
 				MineSweeper:  pg,
 				Dispatcher:   rabbitMQ,
 				Logger:       logger,
@@ -493,8 +502,8 @@ func TestOutbox_RabbitMQWithMySQL(t *testing.T) {
 			}
 
 			// Dispatcher
-			rabbitMQ, err := backend.NewRabbitMQ(
-				amqpURL,
+			rabbitMQ, err := pubsub.NewRabbitMQ(
+				envCfg.RabbitMQURI,
 				mysql,
 				logger,
 			)
@@ -506,7 +515,7 @@ func TestOutbox_RabbitMQWithMySQL(t *testing.T) {
 			populateOutboxTable(t, db, outboxTable, tt.events(), QUESTION)
 
 			// Worker
-			w := outbox_worker.Worker{
+			w := outbox.Worker{
 				MineSweeper:  mysql,
 				Dispatcher:   rabbitMQ,
 				Logger:       logger,
@@ -544,18 +553,15 @@ func TestOutbox_RabbitMQWithMySQL(t *testing.T) {
 func newConnection(t testing.TB) *amqp.Connection {
 	t.Helper()
 
-	conn, err := amqp.Dial(getURLFromEnv(t))
+	conn, err := amqp.Dial(envCfg.RabbitMQURI)
 	assert.NoError(t, err)
 
 	return conn
 }
 
-func getURLFromEnv(tb testing.TB) string {
-	tb.Helper()
-	return os.Getenv("BACKEND_URL")
-}
-
 func setup(t testing.TB, qn, ex, rKey string) (*amqp.Channel, func() error) {
+	t.Helper()
+
 	conn := newConnection(t)
 	ch, _ := conn.Channel()
 	declareExchange(t, ch, ex)
@@ -604,7 +610,7 @@ type SQSQueueParam struct {
 func setupSQS(t *testing.T) *sqs.SQS {
 	t.Helper()
 
-	sqsHost := os.Getenv("SQS_HOST")
+	sqsHost := envCfg.SQSURI
 
 	ses := session.Must(session.NewSessionWithOptions(session.Options{
 		SharedConfigState: session.SharedConfigDisable,
@@ -641,9 +647,8 @@ func createSQSQueue(t *testing.T, sqsService *sqs.SQS) (*sqs.CreateQueueOutput, 
 }
 
 func setupPostgres(t *testing.T, outboxTable string) (*sql.DB, func()) {
-	// Create the outbox table
-
-	db, err := sql.Open("postgres", os.Getenv("DB_URL"))
+	// Create the table for storing outbox rows
+	db, err := sql.Open("postgres", envCfg.PostgresURI)
 	if err != nil {
 		t.Error(err)
 	}
@@ -677,7 +682,7 @@ deleted_at timestamp)
 }
 
 func setupMySQL(t *testing.T, outboxTable string) (*sql.DB, func()) {
-	db, err := sql.Open("mysql", os.Getenv("MYSQL_URL"))
+	db, err := sql.Open("mysql", envCfg.MySQLURI)
 	if err != nil {
 		t.Error(err)
 	}

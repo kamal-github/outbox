@@ -11,7 +11,7 @@ services:
       - postgres
       - rabbit
     env_file:
-      - .env
+      - test/.env
     networks:
       - outbox-nw
   postgres:

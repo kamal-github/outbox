@@ -5,15 +5,15 @@ import (
 	"errors"
 	"time"
 
-	"github.com/kamal-github/outbox/backend"
 	"github.com/kamal-github/outbox/datastore"
+	"github.com/kamal-github/outbox/pubsub"
 	"go.uber.org/zap"
 )
 
 // Worker is the outbox worker which runs repeatedly until asked to stop.
 type Worker struct {
 	MineSweeper  datastore.MineSweeper
-	Dispatcher   backend.Dispatcher
+	Dispatcher   pubsub.Dispatcher
 	MineInterval time.Duration
 
 	Logger *zap.Logger
@@ -51,7 +51,7 @@ func (w Worker) Start(ctx context.Context, done chan<- struct{}) {
 		}
 
 		if err = w.Dispatcher.Dispatch(ctx, events); err != nil {
-			w.Logger.Error("failed while sending event to Dispatcher", zap.Error(err), zap.String("backend", "rabbitmq"))
+			w.Logger.Error("failed while sending event to Dispatcher", zap.Error(err), zap.String("pubsub", "rabbitmq"))
 			// increase counter for metrics
 		}
 	}

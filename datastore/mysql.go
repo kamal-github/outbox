@@ -88,8 +88,8 @@ func (p MySQL) Mine(ctx context.Context) (outboxRows []event.OutboxRow, err erro
 // otherwise marks those records as Failed when failed to publish.
 //
 // It should be called by Messaging system.
-func (p MySQL) Sweep(ctx context.Context, relayedIDs []int, failedIDs []int) error {
-	if err := p.onSuccess(ctx, relayedIDs); err != nil {
+func (p MySQL) Sweep(ctx context.Context, dispatchedIDs, failedIDs []int) error {
+	if err := p.onSuccess(ctx, dispatchedIDs); err != nil {
 		return err
 	}
 	if err := p.onFailure(ctx, failedIDs); err != nil {

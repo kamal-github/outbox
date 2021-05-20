@@ -1,15 +1,15 @@
-package backend
+package pubsub
 
 import (
 	"context"
 	"errors"
 
-	"github.com/kamal-github/outbox/event"
-
 	"github.com/aws/aws-sdk-go/service/sqs"
+	"github.com/kamal-github/outbox/event"
 	"go.uber.org/zap"
 )
 
+// SimpleQueueService represents the SimpleQueueService specific Dispatcher.
 type SimpleQueueService struct {
 	sqsConn *sqs.SQS
 	sweeper Sweeper
@@ -17,26 +17,16 @@ type SimpleQueueService struct {
 	logger *zap.Logger
 }
 
-func NewSimpleQueueService(sqsConn *sqs.SQS, sw Sweeper, logger *zap.Logger) (*SimpleQueueService, error) {
-	if sqsConn == nil {
-		return nil, errors.New("SimpleQueueService: invalid SQS connection")
-	}
-	if logger == nil {
-		return nil, errors.New("SimpleQueueService: invalid logger")
-	}
-
-	return &SimpleQueueService{
-		sqsConn: sqsConn,
-		logger:  logger,
-		sweeper: sw,
-	}, nil
-}
-
+// Dispatch relays the message to SQS queue.
+// Successful publish is considered soon after SendMessageWithContext returns no error, and then sweeper sweeps the
+// successful outbox rows.
+//
+// Failed to publish are immediately marked as "Failed" by sweeper.
 func (s *SimpleQueueService) Dispatch(ctx context.Context, rows []event.OutboxRow) (err error) {
 	var mi *sqs.SendMessageInput
 
-	dispatchedIDs := make(DispatchedIDs, 0)
-	failedIDs := make(FailedIDs, 0)
+	dispatchedIDs := make([]int, 0)
+	failedIDs := make([]int, 0)
 
 	for _, row := range rows {
 		if row.Metadata.SQSCfg == nil {
@@ -63,8 +53,24 @@ func (s *SimpleQueueService) Dispatch(ctx context.Context, rows []event.OutboxRo
 	return
 }
 
+// Close Not implemented yet. No documentation found for
+// closing AWS session.
 func (s *SimpleQueueService) Close() error {
-	// Not implemented yet. No documentation found for
-	// closing AWS session.
 	return errors.New("no method on SQS connection")
+}
+
+// NewSimpleQueueService creates a SimpleQueueService dispatcher.
+func NewSimpleQueueService(sqsConn *sqs.SQS, sw Sweeper, logger *zap.Logger) (*SimpleQueueService, error) {
+	if sqsConn == nil {
+		return nil, errors.New("SimpleQueueService: invalid SQS connection")
+	}
+	if logger == nil {
+		return nil, errors.New("SimpleQueueService: invalid logger")
+	}
+
+	return &SimpleQueueService{
+		sqsConn: sqsConn,
+		logger:  logger,
+		sweeper: sw,
+	}, nil
 }

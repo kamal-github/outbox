@@ -1,4 +1,4 @@
-package backend
+package pubsub
 
 import (
 	"context"
@@ -11,6 +11,7 @@ import (
 	"go.uber.org/zap"
 )
 
+// RabbitMQ represents the RabbitMQ specific Dispatcher.
 type RabbitMQ struct {
 	backendURL string
 	tls        *tls.Config
@@ -63,8 +64,10 @@ func (r *RabbitMQ) Close() error {
 	return r.conn.Shutdown(context.Background())
 }
 
+// Option is functional type to provide an easy way for composing RabbitMQ dispatcher.
 type Option func(mq *RabbitMQ) error
 
+// WithTLS sets the TLS configuration to RabbitMQ instance.
 func WithTLS(t *tls.Config) Option {
 	return func(r *RabbitMQ) error {
 		if t == nil {

@@ -10,8 +10,8 @@ import (
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/sqs"
 	outbox "github.com/kamal-github/outbox"
-	"github.com/kamal-github/outbox/backend"
 	"github.com/kamal-github/outbox/datastore"
+	"github.com/kamal-github/outbox/pubsub"
 	"go.uber.org/zap"
 )
 
@@ -42,8 +42,8 @@ func main() {
 	awsSession := session.Must(session.NewSession())
 	sqsConn := sqs.New(awsSession)
 
-	// Setup SQS as backend
-	dispatcher, err := backend.NewSimpleQueueService(sqsConn, mineSweeper, logger)
+	// Setup SQS as pubsub
+	dispatcher, err := pubsub.NewSimpleQueueService(sqsConn, mineSweeper, logger)
 	if err != nil {
 		panic(err)
 	}

@@ -8,11 +8,10 @@ import (
 
 // ENV maps the Env vars.
 type ENV struct {
-	DBDriver     string        `envconfig:"DB_DRIVER"`
-	DatabaseURL  string        `envconfig:"DB_URL"`
-	OutboxTable  string        `envconfig:"OUTBOX_TABLE"`
-	Backend      string        `envconfig:"BACKEND"`
-	BackendURL   string        `envconfig:"BACKEND_URL"`
+	PostgresURI  string        `envconfig:"PG_URI"`
+	MySQLURI     string        `envconfig:"MYSQL_URI"`
+	RabbitMQURI  string        `envconfig:"RABBITMQ_URI"`
+	SQSURI       string        `envconfig:"SQS_URI"`
 	MineInterval time.Duration `envconfig:"MINE_INTERVAL"`
 }
 
