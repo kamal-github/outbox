@@ -774,15 +774,3 @@ func getRowsFromOutboxTable(db *sql.DB, outboxTable string) ([]event.OutboxRow, 
 
 	return outboxRows, nil
 }
-
-func contains(t *testing.T, strs []string, str string) bool {
-	t.Helper()
-
-	for _, s := range strs {
-		if s == str {
-			return true
-		}
-	}
-
-	return false
-}
