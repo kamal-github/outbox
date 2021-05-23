@@ -29,6 +29,10 @@ const outboxID = "outboxID"
 func (r *RabbitMQ) Dispatch(ctx context.Context, rows []event.OutboxRow) (err error) {
 	var failedIDs []int
 
+	if rows == nil || len(rows) == 0 {
+		return
+	}
+
 	for _, row := range rows {
 		cfg := row.Metadata.RabbitCfg
 		if cfg == nil {

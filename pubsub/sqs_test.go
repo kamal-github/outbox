@@ -236,7 +236,6 @@ func TestSimpleQueueService_Dispatch(t *testing.T) {
 				}(),
 				sweeper: func() (pubsub.Sweeper, *gomock.Controller) {
 					ctrl := gomock.NewController(t)
-
 					d := sweepermock.NewMockSweeper(ctrl)
 
 					d.EXPECT().Sweep(context.TODO(), nil, []int{100}).Return(nil)
