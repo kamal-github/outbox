@@ -25,8 +25,7 @@ type SimpleQueueService struct {
 func (s *SimpleQueueService) Dispatch(ctx context.Context, rows []event.OutboxRow) (err error) {
 	var mi *sqs.SendMessageInput
 
-	dispatchedIDs := make([]int, 0)
-	failedIDs := make([]int, 0)
+	var failedIDs, dispatchedIDs []int
 
 	for _, row := range rows {
 		if row.Metadata.SQSCfg == nil {

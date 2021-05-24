@@ -46,13 +46,11 @@ func (w Worker) Start(ctx context.Context, done chan<- struct{}) {
 		// Validation error (e.g metadata incorrect format) or network error.
 		if err != nil {
 			w.Logger.Error("failed while collecting event from datastore", zap.Error(err))
-			// increase counter for metrics
 			continue
 		}
 
 		if err = w.Dispatcher.Dispatch(ctx, events); err != nil {
 			w.Logger.Error("failed while sending event to Dispatcher", zap.Error(err), zap.String("pubsub", "rabbitmq"))
-			// increase counter for metrics
 		}
 	}
 }
