@@ -25,7 +25,7 @@ go get github.com/kamal-github/outbox
 
 Usage
 ===
-Please have a look at the well commented examples.
+Please have a look at the well commented [examples](https://github.com/kamal-github/outbox/blob/main/worker_test.go)
 
 Contribution
 ===
