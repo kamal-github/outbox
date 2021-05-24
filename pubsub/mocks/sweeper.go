@@ -9,59 +9,7 @@ import (
 	reflect "reflect"
 
 	gomock "github.com/golang/mock/gomock"
-	event "github.com/kamal-github/outbox/event"
 )
-
-// MockDispatcher is a mock of Dispatcher interface.
-type MockDispatcher struct {
-	ctrl     *gomock.Controller
-	recorder *MockDispatcherMockRecorder
-}
-
-// MockDispatcherMockRecorder is the mock recorder for MockDispatcher.
-type MockDispatcherMockRecorder struct {
-	mock *MockDispatcher
-}
-
-// NewMockDispatcher creates a new mock instance.
-func NewMockDispatcher(ctrl *gomock.Controller) *MockDispatcher {
-	mock := &MockDispatcher{ctrl: ctrl}
-	mock.recorder = &MockDispatcherMockRecorder{mock}
-	return mock
-}
-
-// EXPECT returns an object that allows the caller to indicate expected use.
-func (m *MockDispatcher) EXPECT() *MockDispatcherMockRecorder {
-	return m.recorder
-}
-
-// Close mocks base method.
-func (m *MockDispatcher) Close() error {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Close")
-	ret0, _ := ret[0].(error)
-	return ret0
-}
-
-// Close indicates an expected call of Close.
-func (mr *MockDispatcherMockRecorder) Close() *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Close", reflect.TypeOf((*MockDispatcher)(nil).Close))
-}
-
-// Dispatch mocks base method.
-func (m *MockDispatcher) Dispatch(ctx context.Context, rows []event.OutboxRow) error {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Dispatch", ctx, rows)
-	ret0, _ := ret[0].(error)
-	return ret0
-}
-
-// Dispatch indicates an expected call of Dispatch.
-func (mr *MockDispatcherMockRecorder) Dispatch(ctx, rows interface{}) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Dispatch", reflect.TypeOf((*MockDispatcher)(nil).Dispatch), ctx, rows)
-}
 
 // MockSweeper is a mock of Sweeper interface.
 type MockSweeper struct {
