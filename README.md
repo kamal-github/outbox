@@ -1,4 +1,5 @@
 ![Github](https://github.com/kamal-github/outbox/workflows/Go/badge.svg)
+[![Go Reference](https://pkg.go.dev/badge/github.com/kamal-github/outbox.svg)](https://pkg.go.dev/github.com/kamal-github/outbox)
 
 Outbox
 ===
