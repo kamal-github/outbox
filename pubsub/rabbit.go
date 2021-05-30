@@ -5,7 +5,7 @@ import (
 	"crypto/tls"
 	"fmt"
 
-	"github.com/angora-go/angora"
+	"github.com/kamal-github/angora"
 	"github.com/kamal-github/outbox/event"
 	"github.com/streadway/amqp"
 	"go.uber.org/zap"
@@ -47,13 +47,13 @@ func (r *RabbitMQ) Dispatch(ctx context.Context, rows []event.OutboxRow) (err er
 
 		if err = r.conn.Publish(
 			ctx,
-			cfg.Exchange,
 			angora.ProducerConfig{
+				Exchange:   cfg.Exchange,
 				RoutingKey: cfg.RoutingKey,
 				Mandatory:  cfg.Mandatory,
 				Immediate:  cfg.Immediate,
+				Publishing: cfg.Publishing,
 			},
-			cfg.Publishing,
 		); err != nil {
 			failedIDs = append(failedIDs, row.OutboxID)
 			continue
@@ -111,7 +111,7 @@ func NewRabbitMQ(amqpURL string, sw Sweeper, logger *zap.Logger, opts ...Option)
 		}
 
 		var oid int
-		id := up.Publishing.Headers[outboxID]
+		id := up.ProducerCfg.Publishing.Headers[outboxID]
 		if oid, ok = id.(int); !ok {
 			logger.Error("received invalid type, expected int for outbox id")
 		}
@@ -129,7 +129,7 @@ func NewRabbitMQ(amqpURL string, sw Sweeper, logger *zap.Logger, opts ...Option)
 	}
 
 	angOpts := []angora.Option{
-		angora.WithChannelPool(),
+		angora.EnableChannelPool(),
 		angora.WithPublishConfirm(onPubConfirmAckFn),
 	}
 
