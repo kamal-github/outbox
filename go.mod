@@ -7,7 +7,7 @@ require (
 	github.com/aws/aws-sdk-go v1.38.30
 	github.com/go-sql-driver/mysql v1.6.0
 	github.com/golang/mock v1.5.0
-	github.com/kamal-github/angora v0.1.0
+	github.com/kamal-github/angora v0.2.0
 	github.com/kelseyhightower/envconfig v1.4.0
 	github.com/lib/pq v1.10.1
 	github.com/streadway/amqp v1.0.0

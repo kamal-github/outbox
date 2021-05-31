@@ -18,8 +18,8 @@ github.com/jmespath/go-jmespath v0.4.0 h1:BEgLn5cpjn8UN1mAw4NjwDrS35OdebyEtFe+9Y
 github.com/jmespath/go-jmespath v0.4.0/go.mod h1:T8mJZnbsbmF+m6zOOFylbeCJqk5+pHWvzYPziyZiYoo=
 github.com/jmespath/go-jmespath/internal/testify v1.5.1 h1:shLQSRRSCCPj3f2gpwzGwWFoC7ycTf1rcQZHOlsJ6N8=
 github.com/jmespath/go-jmespath/internal/testify v1.5.1/go.mod h1:L3OGu8Wl2/fWfCI6z80xFu9LTZmf1ZRjMHUOPmWr69U=
-github.com/kamal-github/angora v0.1.0 h1:JmP0xPQnrNMgO3DEArJ8KwQ96L8XWju92I1uFwO3KVw=
-github.com/kamal-github/angora v0.1.0/go.mod h1:nGBmvjk9RzmI03orNENuE4JQpHClI7VFA9TQGr9Eaa0=
+github.com/kamal-github/angora v0.2.0 h1:rFKi30HVaYZrZdzYBobFlHMREQ73gO/Oi3P175AOOW4=
+github.com/kamal-github/angora v0.2.0/go.mod h1:nGBmvjk9RzmI03orNENuE4JQpHClI7VFA9TQGr9Eaa0=
 github.com/kelseyhightower/envconfig v1.4.0 h1:Im6hONhd3pLkfDFsbRgu68RDNkGF1r3dvMUtDTo2cv8=
 github.com/kelseyhightower/envconfig v1.4.0/go.mod h1:cccZRl6mQpaq41TPp5QxidR+Sa3axMbJDNb//FQX6Gg=
 github.com/kisielk/gotool v1.0.0/go.mod h1:XhKaO+MFFWcvkIS/tQcRk01m1F5IRFswLeQ+oQHNcck=
