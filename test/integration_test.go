@@ -16,7 +16,7 @@ import (
 	"github.com/kamal-github/outbox/event"
 	"github.com/kamal-github/outbox/internal/config"
 	"github.com/kamal-github/outbox/pubsub"
-	"github.com/streadway/amqp"
+	amqp "github.com/rabbitmq/amqp091-go"
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
 )

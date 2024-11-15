@@ -6,9 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 
-	"github.com/streadway/amqp"
-
 	"github.com/aws/aws-sdk-go/service/sqs"
+	amqp "github.com/rabbitmq/amqp091-go"
 )
 
 // OutboxRow represents the outbox rows in DB
