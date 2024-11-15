@@ -7,7 +7,7 @@ import (
 
 	"github.com/kamal-github/angora"
 	"github.com/kamal-github/outbox/event"
-	"github.com/streadway/amqp"
+	amqp "github.com/rabbitmq/amqp091-go"
 	"go.uber.org/zap"
 )
 

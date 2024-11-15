@@ -6,6 +6,7 @@ networks:
 services:
   mysql:
     image: mysql:8.0.24
+    platform: linux/x86_64
     container_name: ob-mysql
     restart: always
     command: --default-authentication-plugin=mysql_native_password
@@ -20,6 +21,7 @@ services:
       - MYSQL_DATABASE=test_outbox
   postgres:
     image: postgres:13.2-alpine
+    platform: linux/x86_64
     container_name: ob-postgres
     restart: always
     ports:
